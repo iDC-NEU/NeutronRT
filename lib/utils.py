@@ -33,7 +33,7 @@ PERF_LOG = 100
 
 def tsstr(t: torch.Tensor) -> str:
     if isinstance(t, torch.Tensor):
-        return f'({t.dtype} x {t.shape} @ {t.device})'
+        return f'({t.dtype} x {t.shape} @ {t.device} {"pinned" if t.is_cpu and t.is_pinned() else ""})'
     return f'{t}'
 
 
@@ -194,10 +194,10 @@ def download_dataset(dataset: str, root: pathlib.Path) -> DGLGraph:
     return g
 
 
-def split_randperm(num_edges: int, bs_update: int, num_epochs: int) -> torch.Tensor:
+def split_randperm(num_edges: int, bs_update: int, num_snapshots: int) -> torch.Tensor:
     rdperm = torch.randperm(num_edges)
-    sel_rdperm = rdperm[:bs_update * num_epochs]
-    split_rdperm = sel_rdperm.reshape((num_epochs, bs_update))
+    sel_rdperm = rdperm[:bs_update * num_snapshots]
+    split_rdperm = sel_rdperm.reshape((num_snapshots, bs_update))
     logging.info(f'split randperm: {tsstr(split_rdperm)}')
     return split_rdperm
     
@@ -217,15 +217,11 @@ def next_affect_nodes(g: DGLGraph, target_nodes: torch.Tensor) -> torch.Tensor:
     if target_nodes.device != g.device:
         target_nodes = target_nodes.to(g.device)
     u, v = g.out_edges(target_nodes)
-    target_nodes = torch.cat((target_nodes, v)).unique()
-    return target_nodes
+    return v.unique()
 
 
-def next_affect_edges(g: DGLGraph, target_edges: torch.Tensor) -> torch.Tensor:
-    if target_edges.device != g.device:
-        target_edges = target_edges.to(g.device)
-    u, v = g.edges()
-    target_nodes = v[target_edges].unique()
-    eid = g.out_edges(target_nodes, form='eid')
-    target_edges = torch.cat((target_edges, eid))
-    return target_edges
+def next_affect_edges(g: DGLGraph, target_nodes: torch.Tensor) -> torch.Tensor:
+    if target_nodes.device != g.device:
+        target_nodes = target_nodes.to(g.device)
+    u, v = g.out_edges(target_nodes)
+    return (u, v)

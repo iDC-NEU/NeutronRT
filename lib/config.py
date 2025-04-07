@@ -53,7 +53,11 @@ class Config():
         )
         parser.add_argument(
             '--num-epochs', type=int, default=4,
-            help='times for training and update',
+            help='times for training',
+        )
+        parser.add_argument(
+            '--num-snapshots', type=int, default=10,
+            help='times for update',
         )
         parser.add_argument(
             '--num-hiddens', type=int, default=128,
@@ -64,6 +68,7 @@ class Config():
             help='number of the threads will be used'
         )
 
+        # share ratio for now
         parser.add_argument('--embd-host-ratio', type=float, default=0.0)
         parser.add_argument('--embd-cuda-ratio', type=float, default=0.0)
         parser.add_argument('--aggr-host-ratio', type=float, default=0.0)
@@ -85,6 +90,7 @@ class Config():
         # numbers
         self.num_layers: int = args.num_layers
         self.num_epochs: int = args.num_epochs
+        self.num_snapshots: int = args.num_snapshots
         self.num_hiddens: int = args.num_hiddens
         self.num_threads: int = args.num_threads
 

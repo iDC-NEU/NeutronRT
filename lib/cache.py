@@ -18,6 +18,16 @@ class LayerCache():
         logging.info(f'create cache: {tsstr(cache)}')
         self.cache = cache
 
+    def fetch(self, targets: torch.Tensor, device: torch.device):
+        if targets.device != self.cache.device:
+            targets = targets.to(self.cache.device)
+        targets, indice = targets.unique(return_inverse=True)
+        cache = self.cache[targets]
+        if device != self.cache.device:
+            cache = cache.to(device)
+        cache = cache[indice]
+        return cache
+
 
 class Cache():
     def __init__(

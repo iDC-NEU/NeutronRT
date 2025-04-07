@@ -27,7 +27,10 @@ from lib.utils import (
     PERF_LOG,
 )
 
+# debugging environment varibales
+os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
+# add new log level for perf estimation
 logging.addLevelName(PERF_LOG, 'PERF')
 
 perf_file_handler = logging.FileHandler('logs/NeutronRT.perf.log')
@@ -67,13 +70,13 @@ def run_base(cfg: Config, g: DGLGraph, model: nn.Module, spawn: bool = False):
 
         mp.spawn(r_sample, (cfg, g, model, True))
     else:
-        cfg.fanouts = [5, 5]
-        r_sample(0, cfg, g, model)
+        # cfg.fanouts = [5, 5]
+        # r_sample(0, cfg, g, model)
 
-        cfg.fanouts = [10, 10]
-        r_sample(0, cfg, g, model)
+        # cfg.fanouts = [10, 10]
+        # r_sample(0, cfg, g, model)
         
-        r_sample(0, cfg, g, model, True, True)
+        # r_sample(0, cfg, g, model, True, True)
         
         r_sample(0, cfg, g, model, True)
 
@@ -107,7 +110,7 @@ if __name__ == '__main__':
     logging.info(f'label: {tsstr(g.ndata["label"])}')
 
     logging.info(f'create random update edges')
-    cfg.edges_updated = split_randperm(g.num_edges(), cfg.bs_update, cfg.num_epochs)
+    cfg.edges_updated = split_randperm(g.num_edges(), cfg.bs_update, cfg.num_snapshots)
 
     num_features = g.ndata['feat'].shape[1]
     num_classes = g.ndata['label'].unique().shape[0]
@@ -123,14 +126,16 @@ if __name__ == '__main__':
 
     model_list: List[Tuple[nn.Module, nn.Module]] = []
     for model_name in cfg.model_names:
-        normal_model = model_factory(model_name, cfg.num_layers, num_features, cfg.num_hiddens, num_classes)
+        logging.info(f'create model {model_name}')
+        logging.log(PERF_LOG, f'> {model_name} @ {cfg.dataset_name}')
         reduce_model = model_factory(model_name, cfg.num_layers, num_features, cfg.num_hiddens, num_classes, conv=GraphConvReduce)
-        
-        normal_model.eval()
         reduce_model.eval()
-        
-        model_list.append((normal_model, reduce_model))
+        # run_part(cfg, g, reduce_model)
 
-    for normal_model, reduce_model in model_list:
-        run_part(cfg, g, reduce_model)
+        normal_model = model_factory(model_name, cfg.num_layers, num_features, cfg.num_hiddens, num_classes)
+        normal_model.eval()
         run_base(cfg, g, normal_model)
+        logging.log(PERF_LOG, f'< {model_name} @ {cfg.dataset_name}')
+        logging.log(PERF_LOG, f'*****')
+
+    

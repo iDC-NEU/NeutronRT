@@ -117,10 +117,11 @@ def r_partial(pidx: int, cfg: Config, g: DGLGraph, model: nn.Module):
         output_device=device,
     )
 
-    logging.info(f'> {infer_test}')
+    logging.log(PERF_LOG, f'> {infer_test}')
     clk_begin(infer_test)
     model.module.partial_infer(cfg, g, caches)
-    logging.info(f'{infer_test} in total: {clk_end(infer_test)}')
-    logging.info(f'< {infer_test}')
+    logging.log(PERF_LOG, f'{infer_test} in total: {clk_end(infer_test)}')
+    logging.log(PERF_LOG, f'< {infer_test}')
 
+    logging.log(PERF_LOG, f'-----')
     dist.destroy_process_group()
