@@ -210,7 +210,8 @@ def final_affect_nodes(g: DGLGraph, target_nodes: torch.Tensor, num_layers: int)
     for _ in range(num_layers - 1):
         u, v = g.out_edges(target_nodes)
         aff_map[v] = True
-    return torch.where(aff_map)[0]
+    aff_nodes = torch.where(aff_map)[0]
+    return aff_nodes.contiguous()
 
 
 def next_affect_nodes(g: DGLGraph, target_nodes: torch.Tensor) -> torch.Tensor:

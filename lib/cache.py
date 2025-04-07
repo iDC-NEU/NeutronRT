@@ -38,12 +38,12 @@ class Cache():
         self.device = 'cuda' if cfg.in_memory else 'cpu'
         self.h_cache: List[LayerCache] = []
         self.a_cache: List[LayerCache] = []
-
-        self.h_cache.append(
-            LayerCache(g.ndata['feat'])
-        )
         
         logging.info(f'cache device: {self.device}')
+
+        self.h_cache.append(
+            LayerCache(g.ndata['feat'].to(self.device))
+        )
 
         for i in range(cfg.num_layers - 1):
             self.h_cache.append(
@@ -56,7 +56,7 @@ class Cache():
                     )
                 )
             )
-            logging.info(f'layer cache #{i}: {tsstr(self.h_cache[-1].cache)}')
+
 
     def build_aggr_cache(
             self,

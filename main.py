@@ -1,6 +1,7 @@
 import os
 import sys
 import logging
+import pathlib
 
 import dgl
 import torch
@@ -37,11 +38,6 @@ perf_file_handler = logging.FileHandler('logs/NeutronRT.perf.log')
 log_file_handler = logging.FileHandler('logs/NeutronRT.log')
 cmd_handler = logging.StreamHandler(sys.stderr)
 
-logging.basicConfig(
-    level=logging.DEBUG,
-    handlers=[perf_file_handler, log_file_handler, cmd_handler]
-)
-
 perf_file_handler.setLevel(PERF_LOG)
 perf_file_handler.setFormatter(
     logging.Formatter('%(message)s')
@@ -57,6 +53,11 @@ cmd_handler.setFormatter(
     logging.Formatter('%(message)s')
 )
 
+logging.basicConfig(
+    level=logging.DEBUG,
+    handlers=[perf_file_handler, log_file_handler, cmd_handler]
+)
+
 
 def run_base(cfg: Config, g: DGLGraph, model: nn.Module, spawn: bool = False):
     if spawn:
@@ -70,13 +71,13 @@ def run_base(cfg: Config, g: DGLGraph, model: nn.Module, spawn: bool = False):
 
         mp.spawn(r_sample, (cfg, g, model, True))
     else:
-        # cfg.fanouts = [5, 5]
-        # r_sample(0, cfg, g, model)
+        cfg.fanouts = [5, 5]
+        r_sample(0, cfg, g, model)
 
-        # cfg.fanouts = [10, 10]
-        # r_sample(0, cfg, g, model)
+        cfg.fanouts = [10, 10]
+        r_sample(0, cfg, g, model)
         
-        # r_sample(0, cfg, g, model, True, True)
+        r_sample(0, cfg, g, model, True, True)
         
         r_sample(0, cfg, g, model, True)
 
@@ -106,11 +107,18 @@ if __name__ == '__main__':
     g = download_dataset(cfg.dataset_name, cfg.dataset_root)
     logging.info('dataloading end')
     logging.info(f'graph: {g}')
+    logging.info(f'ntypes: {g.ntypes}')
     logging.info(f'feat: {tsstr(g.ndata["feat"])}')
     logging.info(f'label: {tsstr(g.ndata["label"])}')
 
     logging.info(f'create random update edges')
-    cfg.edges_updated = split_randperm(g.num_edges(), cfg.bs_update, cfg.num_snapshots)
+    cached_update_file = pathlib.Path(f'{cfg.dataset_root}/.cache/{g.num_edges()}.{cfg.bs_update}.{cfg.num_snapshots}.update')
+    if cached_update_file.is_file():
+        logging.info(f'loading pre generated update file from {cached_update_file}')
+        cfg.edges_updated = torch.load(cached_update_file)
+    else:
+        cfg.edges_updated = split_randperm(g.num_edges(), cfg.bs_update, cfg.num_snapshots)
+        torch.save(cfg.edges_updated, cached_update_file)
 
     num_features = g.ndata['feat'].shape[1]
     num_classes = g.ndata['label'].unique().shape[0]
@@ -128,13 +136,17 @@ if __name__ == '__main__':
     for model_name in cfg.model_names:
         logging.info(f'create model {model_name}')
         logging.log(PERF_LOG, f'> {model_name} @ {cfg.dataset_name}')
-        reduce_model = model_factory(model_name, cfg.num_layers, num_features, cfg.num_hiddens, num_classes, conv=GraphConvReduce)
-        reduce_model.eval()
-        # run_part(cfg, g, reduce_model)
+        reduce_model = model_factory(f'partial-{model_name}', cfg.num_layers, num_features, cfg.num_hiddens, num_classes)
+        if reduce_model is not None:
+            reduce_model = reduce_model.eval()
+            logging.info(f'partial-{model_name}: {reduce_model}')
+            run_part(cfg, g, reduce_model, spawn=True)
 
         normal_model = model_factory(model_name, cfg.num_layers, num_features, cfg.num_hiddens, num_classes)
-        normal_model.eval()
-        run_base(cfg, g, normal_model)
+        if normal_model is not None:
+            normal_model = normal_model.eval()
+            logging.info(f'{model_name}: {normal_model}')
+            run_base(cfg, g, normal_model, spawn=True)
         logging.log(PERF_LOG, f'< {model_name} @ {cfg.dataset_name}')
         logging.log(PERF_LOG, f'*****')
 

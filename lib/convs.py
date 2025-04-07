@@ -14,8 +14,6 @@ from dgl.base import DGLError
 from torch import Tensor
 from typing import Callable
 
-from dgl.nn.pytorch.conv.graphconv import EdgeWeightNorm
-
 # self defined
 from .cache import Cache, LayerCache
 from .utils import tsstr

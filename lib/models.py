@@ -14,6 +14,7 @@ from dgl.dataloading import NeighborSampler, DataLoader, MultiLayerFullNeighborS
 # self defined
 from .config import Config
 from .cache import Cache
+from .convs import GraphConvReduce
 from .utils import (
     clk_begin,
     clk_end,
@@ -33,32 +34,180 @@ def model_factory(
         **kwargs
 ):
     model = None
-    if model_name == 'gcn':
-        model = GCN(
-            num_layers=num_layers,
-            num_features=num_features,
-            num_hiddens=num_hiddens,
-            num_classes=num_classes,
-            **kwargs,
-        )
+    if kwargs.get('conv', None) is None:
+        activation = kwargs.get('activation', F.relu)
+
+        if model_name.startswith('partial-'):
+            if model_name == 'partial-gcn':
+                kwargs['conv'] = GraphConvReduce
+
+                kwargs['conv_in_args'] = {
+                    'in_feats': num_features,
+                    'out_feats': num_hiddens,
+                    'activation': kwargs.get('activation', F.relu),
+                }
+                kwargs['conv_hidden_args'] = {
+                    'in_feats': num_hiddens,
+                    'out_feats': num_hiddens,
+                    'activation': kwargs.get('activation', F.relu),
+                }
+                kwargs['conv_out_args'] = {
+                    'in_feats': num_hiddens,
+                    'out_feats': num_classes,
+                }
+            else:
+                logging.error(f'{model_name} not support')
+                return None
+        else:
+            if model_name == 'gcn':
+                kwargs['conv'] = dglnn.GraphConv
+
+                kwargs['conv_in_args'] = {
+                    'in_feats': num_features,
+                    'out_feats': num_hiddens,
+                    'activation': kwargs.get('activation', F.relu),
+                }
+                kwargs['conv_hidden_args'] = {
+                    'in_feats': num_hiddens,
+                    'out_feats': num_hiddens,
+                    'activation': kwargs.get('activation', F.relu),
+                }
+                kwargs['conv_out_args'] = {
+                    'in_feats': num_hiddens,
+                    'out_feats': num_classes,
+                }
+            elif model_name == 'gat':
+                kwargs['conv'] = dglnn.GATv2Conv
+                kwargs['conv_in_args'] = {
+                    'in_feats': num_features,
+                    'out_feats': num_hiddens,
+                    'num_heads': kwargs.get('num_heads', 1),
+                    'feat_drop': kwargs.get('feat_drop', 0.6),
+                    'attn_drop': kwargs.get('attn_drop', 0.6),
+                    'activation': kwargs.get('activation', F.elu),
+                }
+                kwargs['conv_hidden_args'] = {
+                    'in_feats': num_hiddens,
+                    'out_feats': num_hiddens,
+                    'num_heads': kwargs.get('num_heads', 1),
+                    'feat_drop': kwargs.get('feat_drop', 0.6),
+                    'attn_drop': kwargs.get('attn_drop', 0.6),
+                    'activation': kwargs.get('activation', F.elu),
+                }
+                kwargs['conv_out_args'] = {
+                    'in_feats': num_hiddens,
+                    'out_feats': num_classes,
+                    'num_heads': kwargs.get('num_heads', 1),
+                    'feat_drop': kwargs.get('feat_drop', 0.6),
+                    'attn_drop': kwargs.get('attn_drop', 0.6),
+                }
+            elif model_name == 'gin':
+                kwargs['conv'] = dglnn.GINConv
+                lin = kwargs.get('lin', nn.Linear)
+                aggregator_type = kwargs.get('aggregator_type', 'sum')
+
+                kwargs['conv_in_args'] = {
+                    'apply_func': lin(num_features, num_hiddens),
+                    'aggregator_type': aggregator_type,
+                    'activation': activation,
+                }
+                kwargs['conv_hidden_args'] = {
+                    'apply_func': lin(num_hiddens, num_hiddens),
+                    'aggregator_type': aggregator_type,
+                    'activation': activation,
+                }
+                kwargs['conv_out_args'] = {
+                    'apply_func': lin(num_hiddens, num_classes),
+                    'aggregator_type': aggregator_type,
+                }
+            elif model_name == 'sage':
+                kwargs['conv'] = dglnn.SAGEConv
+                aggregator_type = kwargs.get('aggregator_type', 'mean')
+
+                kwargs['conv_in_args'] = {
+                    'in_feats': num_features,
+                    'out_feats': num_hiddens,
+                    'aggregator_type': aggregator_type,
+                    'activation': activation,
+                }
+                kwargs['conv_hidden_args'] = {
+                    'in_feats': num_hiddens,
+                    'out_feats': num_hiddens,
+                    'aggregator_type': aggregator_type,
+                    'activation': activation,
+                }
+                kwargs['conv_out_args'] = {
+                    'in_feats': num_hiddens,
+                    'out_feats': num_classes,
+                    'aggregator_type': aggregator_type,
+                }
+            elif model_name == 'agnn':
+                kwargs['conv'] = dglnn.AGNNConv
+
+                kwargs['conv_in_args'] = {}
+                kwargs['conv_hidden_args'] = {}
+                kwargs['conv_out_args'] = {}
+            elif model_name == 'monet':
+                kwargs['conv'] = dglnn.GMMConv
+                dim = kwargs.get('dim', 1)
+                n_kernels = kwargs.get('n_kernels', 1)
+                aggregator_type = kwargs.get('aggregator_type', 'sum')
+
+                kwargs['conv_in_args'] = {
+                    'in_feats': num_features,
+                    'out_feats': num_hiddens,
+                    'dim': dim,
+                    'n_kernels': n_kernels,
+                    'aggregator_type': aggregator_type,
+                }
+                kwargs['conv_hidden_args'] = {
+                    'in_feats': num_hiddens,
+                    'out_feats': num_hiddens,
+                    'dim': dim,
+                    'n_kernels': n_kernels,
+                    'aggregator_type': aggregator_type,
+                }
+                kwargs['conv_out_args'] = {
+                    'in_feats': num_hiddens,
+                    'out_feats': num_classes,
+                    'dim': dim,
+                    'n_kernels': n_kernels,
+                    'aggregator_type': aggregator_type,
+                }
+            else:
+                logging.error(f'{model_name} not support')
+                return None
+
+    model = Basic(
+        model_name=model_name,
+        num_layers=num_layers,
+        num_features=num_features,
+        num_hiddens=num_hiddens,
+        num_classes=num_classes,
+        **kwargs,
+    )
     return model
 
 
-class GCN(nn.Module):
+class Basic(nn.Module):
     def __init__(
             self,
+            model_name: str,
             num_layers: int,
             num_features: int,
             num_hiddens: int,
             num_classes: int,
-            conv: Type[nn.Module] = dglnn.GraphConv,
+            conv: Type[nn.Module],
             dropout: float = 0.5,
+            **kwargs,
     ):
         super().__init__()
         logging.debug(f'model creation begin')
         logging.debug(f'{num_layers} layers')
         logging.debug(f'dims: ({num_features}, {num_hiddens}, {num_classes})')
         logging.debug(f'dropout: {dropout}')
+        
+        self.model_name = model_name
 
         self.num_layers = num_layers
         self.num_features = num_features
@@ -66,39 +215,21 @@ class GCN(nn.Module):
         self.num_classes = num_classes
 
         self.layers = nn.ModuleList()
-        self.layers.append(
-            conv(
-                in_feats=num_features,
-                out_feats=num_hiddens,
-                activation=F.relu,
-            )
-        )
+        self.layers.append(conv(**kwargs['conv_in_args']))
         for _ in range(num_layers - 2):
-            self.layers.append(
-                conv(
-                    in_feats=num_hiddens,
-                    out_feats=num_hiddens,
-                    activation=F.relu,
-                )
-            )
-        self.layers.append(
-            conv(
-                in_feats=num_hiddens,
-                out_feats=num_classes,
-            )
-        )
+            self.layers.append(conv(**kwargs['conv_hidden_args']))
+        self.layers.append(conv(**kwargs['conv_out_args']))
+
+        if self.model_name == 'monet':
+            self.pseudo_proj = kwargs.get('pseudo_proj', nn.ModuleList())
+            if len(self.pseudo_proj) == 0:
+                self.pseudo_proj.append(nn.Sequential(nn.Linear(2, kwargs['conv_in_args']['dim']), nn.Tanh()))
+                for _ in range(num_layers - 2):
+                    self.pseudo_proj.append(nn.Sequential(nn.Linear(2, kwargs['conv_in_args']['dim']), nn.Tanh()))
+                self.pseudo_proj.append(nn.Sequential(nn.Linear(2, kwargs['conv_in_args']['dim']), nn.Tanh()))
 
         self.dropout = nn.Dropout(p=dropout)
         logging.debug(f'model creation end')
-
-
-    def forward(self, blocks, x):
-        h = x
-        for idx, (layer, block) in enumerate(zip(self.layers, blocks)):
-            if idx != self.num_layers - 1:
-                h = self.dropout(h)
-            h = layer(block, h)
-        return h
     
 
     @torch.no_grad()
@@ -117,6 +248,11 @@ class GCN(nn.Module):
         edges_involved_bitmap = torch.zeros(g.num_edges(), dtype=torch.bool)
 
         src, dst = g.edges()
+        if self.model_name == 'monet':
+            udeg = 1 / torch.sqrt(g.in_degrees(src).float())
+            vdeg = 1 / torch.sqrt(g.in_degrees(dst).float())
+            pseudo = torch.cat([udeg.unsqueeze(1), vdeg.unsqueeze(1)], dim=1).to('cuda')
+
         logging.debug('inference begin')
         for update_batch in cfg.edges_updated:
             logging.debug(f'update edges: {tsstr(update_batch)}')
@@ -141,7 +277,7 @@ class GCN(nn.Module):
                 g,
                 affect_nodes,
                 sampler,
-                device='cuda',
+                device='cuda' if cfg.in_memory else 'cpu',
                 batch_size=cfg.bs_compute,
                 shuffle=True,
                 drop_last=False,
@@ -150,20 +286,36 @@ class GCN(nn.Module):
                 use_uva=cfg.use_uva,
             )
 
+            if nloader.device == torch.device('cpu'):
+                nloader.enable_cpu_affinity(
+                    loader_cores=cfg.numa[:24],
+                    compute_cores=cfg.numa[24:],
+                )
+
             # computation
             logging.debug(f'computation begin')
             h_list = []
             clk_begin('total')
             for it, (input_nodes, output_nodes, blocks) in enumerate(nloader):
-                h_list.append(blocks[0].srcdata['feat'])
-                accu_compt_time = 0
+                h_list.append(blocks[0].srcdata['feat'].to('cuda'))
                 clk_begin('compute')
                 for layer_idx, (layer, block) in enumerate(zip(self.layers, blocks)):
-                    logging.debug(f'{it} {layer_idx}')
-                    h = h_list[it]
+                    block = block.to('cuda')
+                    h = h_list[it].to('cuda')
+                    if self.model_name == 'monet':
+                        epseu = pseudo[block.edges('eid').to('cuda')]
+                        additional_arguments = {
+                            'pseudo': self.pseudo_proj[layer_idx](epseu)
+                        }
+                    else:
+                        additional_arguments = {}
                     if layer_idx != self.num_layers - 1:
                         h = self.dropout(h)
-                    h = layer(block, h)
+                    h = layer(block, h, **additional_arguments)
+
+                    if self.model_name == 'gat':
+                        # use mean for now
+                        h = torch.mean(h, dim=1)
                     h_list[it] = h
                 compt_time.append(clk_end('compute'))
                 total_time.append(clk_end('total'))
@@ -217,6 +369,12 @@ class GCN(nn.Module):
         edges_involved_bitmap = torch.zeros(g.num_edges(), dtype=torch.bool)
 
         src, dst = g.edges()
+        if self.model_name == 'monet':
+            udeg = 1 / torch.sqrt(g.in_degrees(src).float())
+            vdeg = 1 / torch.sqrt(g.in_degrees(dst).float())
+            pseudo = torch.cat([udeg.unsqueeze(1), vdeg.unsqueeze(1)], dim=1).to('cuda')
+
+        src, dst = g.edges()
         logging.debug('inference begin')
         for update_batch in cfg.edges_updated:
             logging.debug(f'update edges: {tsstr(update_batch)}')
@@ -259,10 +417,23 @@ class GCN(nn.Module):
                     assert len(blocks) == 1, 'multi-hop sample'
                     block = blocks[0]
 
+                    if self.model_name == 'monet':
+                        epseu = pseudo[block.edges('eid').to('cuda')]
+                        additional_arguments = {
+                            'pseudo': self.pseudo_proj[layer_idx](epseu)
+                        }
+                    else:
+                        additional_arguments = {}
+
                     clk_begin('compute')
                     if layer_idx != self.num_layers - 1:
                         h = self.dropout(h)
-                    h = layer(block, h)
+
+                    h = layer(block, h, **additional_arguments)
+
+                    if self.model_name == 'gat':
+                        # use mean for now
+                        h = torch.mean(h, dim=1)
                     compt_time.append(clk_end('compute'))
 
                     if layer_idx != self.num_layers - 1:
@@ -331,6 +502,12 @@ class GCN(nn.Module):
         nodes_involved_bitmap = torch.zeros(g.num_nodes(), dtype=torch.bool)
         edges_involved_bitmap = torch.zeros(g.num_edges(), dtype=torch.bool)
 
+        src, dst = g.edges()
+        if self.model_name == 'monet':
+            udeg = 1 / torch.sqrt(g.in_degrees(src).float())
+            vdeg = 1 / torch.sqrt(g.in_degrees(dst).float())
+            pseudo = torch.cat([udeg.unsqueeze(1), vdeg.unsqueeze(1)], dim=1).to('cuda')
+
         sampler = MultiLayerFullNeighborSampler(1)
         for update_batch in cfg.edges_updated:
             logging.debug(f'update edges: {tsstr(update_batch)}')
@@ -338,8 +515,8 @@ class GCN(nn.Module):
             compt_time = []
             total_time = []
 
-            affect_edges = update_batch.to(g.device)
             src, dst = g.edges()
+            affect_edges = update_batch.to(g.device)
             subg = dgl.graph((src[affect_edges], dst[affect_edges]), num_nodes=g.num_nodes(), device=g.device)
             if g.is_pinned():
                 subg.pin_memory_()
@@ -383,6 +560,10 @@ class GCN(nn.Module):
                     if layer_idx != self.num_layers - 1:
                         h = self.dropout(h)
                     h, a = layer(block, h, a)
+
+                    if self.model_name == 'gat':
+                        # use mean for now
+                        h = torch.mean(h, dim=1)
                     compt_time.append(clk_end('compute'))
 
                     if layer_idx != self.num_layers - 1:

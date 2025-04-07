@@ -60,8 +60,6 @@ def r_sample(pidx: int, cfg: Config, g: DGLGraph, model: nn.Module, full_neighbo
         for layer_idx in range(cfg.num_layers):
             samplers.append(NeighborSampler(
                 [cfg.fanouts[layer_idx]],
-                prefetch_node_feats=["feat"],
-                prefetch_labels=["label"],
             ))
 
         logging.log(PERF_LOG, f'> {infer_test} begin')
@@ -72,8 +70,6 @@ def r_sample(pidx: int, cfg: Config, g: DGLGraph, model: nn.Module, full_neighbo
     else:
         sampler = NeighborSampler(
             fanouts,
-            prefetch_node_feats=["feat"],
-            prefetch_labels=["label"],
         )
 
         logging.log(PERF_LOG, f'> {infer_test} begin')

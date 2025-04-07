@@ -2,6 +2,9 @@ import argparse
 import pathlib
 import json
 
+from typing import Optional
+from torch import Tensor
+
 from .utils import GB
 
 
@@ -18,9 +21,7 @@ class Config():
         )
         parser.add_argument(
             '--models', type=str, default="gcn",
-            choices=[
-                'gcn', 'gat', 'sage', 'gin',
-            ]
+            help='choose gnn models like gcn,gat,gin or single gcn',
         )
         parser.add_argument(
             '--dataset', type=str, default='ogbn-arxiv',
@@ -33,10 +34,15 @@ class Config():
             ]
         )
         parser.add_argument(
+            '--numa', type=str, default='0',
+            help='choose cpu cores on which the dataloader will run',
+        )
+        parser.add_argument(
             '--gpus', type=str, default='0',
             help='choose devices on which the model will run',
         )
-        parser.add_argument('--fanouts', type=str, default='-1',
+        parser.add_argument(
+            '--fanouts', type=str, default='-1',
             help='the num of neighbours sampled per layer'
         )
         parser.add_argument(
@@ -80,6 +86,7 @@ class Config():
         self.dataset_name: str = args.dataset
         self.aggr_method: str = args.aggr
         self.model_names = args.models.split(',')
+        self.numa = [int(dev) for dev in args.gpus.split(',')]
         self.gpus = [int(dev) for dev in args.gpus.split(',')]
         self.fanouts = [int(fanout) for fanout in args.fanouts.split(',')]
 
@@ -103,6 +110,9 @@ class Config():
         self.in_memory = bool(self.dataset_name in ['ogbn-arxiv', 'ogbn-products', 'reddit'])
         self.map_location = 'cuda' if self.in_memory else 'cpu'
         self.use_uva = False if self.in_memory else True
+
+        # pre-defined for type infer
+        self.edges_updated: Optional[Tensor] = None
 
 
     def __str__(self):
