@@ -13,6 +13,7 @@ import torch
 import numpy as np
 
 # types
+from typing import List
 from dgl import DGLGraph
 from dgl.data import AsNodePredDataset, RedditDataset
 from ogb.nodeproppred import DglNodePropPredDataset
@@ -40,15 +41,74 @@ def tsstr(t: torch.Tensor) -> str:
 def free_ram() -> float:
     return PROCESS.memory_info().rss / GB
 
+
 # for time profile
 
-_clocker = {}
+class StatisticInformation():
+    def __init__(self):
+        self.timer = {}
+        self.time_records = {}
+        self.time_records_per_round = {}
 
-def clk_begin(clock_name: str):
-    _clocker[clock_name] = time.perf_counter()
+        self.counter = {}
+        self.records = {}
 
-def clk_end(clock_name: str) -> float:
-    return time.perf_counter() - _clocker.pop(clock_name)
+
+    def clk_begin(self, clock_name: str):
+        self.timer[clock_name] = time.perf_counter()
+        if clock_name not in self.time_records:
+            self.time_records[clock_name] = []
+
+    
+    def clk_end(self, clock_names: List[str]):
+        now = time.perf_counter()
+        if isinstance(clock_names, str):
+            clock_names = [clock_names]
+
+        for clock_name in clock_names:
+            t = now - self.timer.pop(clock_name)
+            assert clock_name in self.time_records
+            self.time_records[clock_name].append(t)
+
+    
+    def clk_end_round(self):
+        for k in self.time_records.keys():
+            v = self.time_records[k]
+            if isinstance(v, List):
+                v = np.sum(v)
+            if k not in self.time_records_per_round:
+                self.time_records_per_round[k] = []
+            self.time_records_per_round[k].append(v)
+        self.time_records.clear()
+
+
+    def count(self, name: str, value: int | float):
+        if name in self.counter:
+            self.counter[name] += value
+        else:
+            self.counter[name] = value
+
+
+    def summary(self, rounds: int = 1):
+        compt_sum_time = np.array(self.time_records_per_round['compute'])
+        affxt_sum_time = np.array(self.time_records_per_round['affect'])
+        total_sum_time = np.array(self.time_records_per_round['total'])
+
+        nodes_sampled = self.counter['nodes_sampled']
+        edges_sampled = self.counter['edges_sampled']
+        nodes_affected = self.counter['nodes_affected']
+        nodes_involved_unique = self.counter['nodes_involved_unique']
+        edges_involved_unique = self.counter['edges_involved_unique']
+
+        logging.log(PERF_LOG, f'Computation     time: {np.median(compt_sum_time)}')
+        logging.log(PERF_LOG, f'Affect analysis time: {np.median(affxt_sum_time)}')
+        logging.log(PERF_LOG, f'Sample+Transfer time: {np.median(total_sum_time - compt_sum_time)}')
+        logging.log(PERF_LOG, f'Nodes  in total: {nodes_sampled // rounds}')
+        logging.log(PERF_LOG, f'Edges  in total: {edges_sampled // rounds}')
+        logging.log(PERF_LOG, f'aNodes in total: {nodes_affected // rounds}')
+        logging.log(PERF_LOG, f'uNodes in total: {nodes_involved_unique // rounds}')
+        logging.log(PERF_LOG, f'uEdges in total: {edges_involved_unique // rounds}')
+
 
 # for dataset
 

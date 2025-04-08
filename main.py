@@ -21,8 +21,6 @@ from lib.app import r_sample, r_partial
 from lib.utils import (
     download_dataset, 
     split_randperm, 
-    clk_begin, 
-    clk_end, 
     free_ram,
     tsstr,
     PERF_LOG,

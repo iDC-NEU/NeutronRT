@@ -111,3 +111,8 @@ class GraphConvReduce(dglnn.GraphConv):
                 rst = self._activation(rst)
 
             return rst, aggr_out
+        
+
+class GATv2ConvReduce():
+    def __init__(self) -> None:
+        pass

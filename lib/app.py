@@ -1,3 +1,4 @@
+import timeit
 import logging
 
 import dgl
@@ -16,8 +17,6 @@ from torch.nn.parallel import DistributedDataParallel
 from .cache import Cache
 from .config import Config
 from .utils import (
-    clk_begin, 
-    clk_end, 
     free_ram,
     tsstr,
     PERF_LOG,
@@ -63,9 +62,8 @@ def r_sample(pidx: int, cfg: Config, g: DGLGraph, model: nn.Module, full_neighbo
             ))
 
         logging.log(PERF_LOG, f'> {infer_test} begin')
-        clk_begin(infer_test)
-        model.module.sample_cached_infer(cfg, g, samplers, caches)
-        logging.log(PERF_LOG, f'{infer_test} in total: {clk_end(infer_test)}')
+        t = timeit.timeit(lambda: model.module.sample_cached_infer(cfg, g, samplers, caches), number=1)
+        logging.log(PERF_LOG, f'{infer_test} in total: {t}')
         logging.log(PERF_LOG, f'< {infer_test} end')
     else:
         sampler = NeighborSampler(
@@ -73,9 +71,8 @@ def r_sample(pidx: int, cfg: Config, g: DGLGraph, model: nn.Module, full_neighbo
         )
 
         logging.log(PERF_LOG, f'> {infer_test} begin')
-        clk_begin(infer_test)
-        model.module.sample_infer(cfg, g, sampler)
-        logging.log(PERF_LOG, f'{infer_test} in total: {clk_end(infer_test)}')
+        t = timeit.timeit(lambda: model.module.sample_infer(cfg, g, sampler), number=1)
+        logging.log(PERF_LOG, f'{infer_test} in total: {t}')
         logging.log(PERF_LOG, f'< {infer_test} end')
 
     logging.log(PERF_LOG, f'-----')
@@ -114,9 +111,8 @@ def r_partial(pidx: int, cfg: Config, g: DGLGraph, model: nn.Module):
     )
 
     logging.log(PERF_LOG, f'> {infer_test}')
-    clk_begin(infer_test)
-    model.module.partial_infer(cfg, g, caches)
-    logging.log(PERF_LOG, f'{infer_test} in total: {clk_end(infer_test)}')
+    t = timeit.timeit(lambda: model.module.partial_infer(cfg, g, caches), number=1)
+    logging.log(PERF_LOG, f'{infer_test} in total: {t}')
     logging.log(PERF_LOG, f'< {infer_test}')
 
     logging.log(PERF_LOG, f'-----')
