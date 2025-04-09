@@ -34,7 +34,7 @@ class Config():
             ]
         )
         parser.add_argument(
-            '--numa', type=str, default='0',
+            '--numa', type=Optional[str], default=None,
             help='choose cpu cores on which the dataloader will run',
         )
         parser.add_argument(

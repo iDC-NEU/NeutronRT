@@ -33,7 +33,7 @@ class GraphConvReduce(dglnn.GraphConv):
         super().__init__(in_feats, out_feats, norm, weight, bias, activation, allow_zero_in_degree)
         
 
-    def forward(self, graph: DGLGraph, feat: Tensor, a_cache: torch.Tensor, weight = None, edge_weight = None):
+    def forward(self, graph: DGLGraph, feat: Tensor, weight = None, edge_weight = None):
         with graph.local_scope():
             if not self._allow_zero_in_degree:
                 if (graph.in_degrees() == 0).any():
@@ -82,17 +82,19 @@ class GraphConvReduce(dglnn.GraphConv):
                     feat_src = torch.matmul(feat_src, weight)
                 graph.srcdata["h"] = feat_src
                 graph.update_all(aggregate_fn, fn.sum(msg="m", out="h"))
-                partial_aggr_out = graph.dstdata["h"]
+                graph.dstdata["h"].add_(graph.dstdata["aggr_cache"])
+                rst = graph.dstdata["h"]
             else:
                 # aggregate first then mult W
                 graph.srcdata["h"] = feat_src
                 graph.update_all(aggregate_fn, fn.sum(msg="m", out="h"))
-                partial_aggr_out = graph.dstdata["h"]
+                rst = graph.dstdata["h"]
                 if weight is not None:
-                    partial_aggr_out = torch.matmul(partial_aggr_out, weight)
+                    rst = torch.matmul(rst, weight)
+                rst.add_(graph.dstdata["aggr_cache"])
 
-            aggr_out = partial_aggr_out + a_cache
-            rst = aggr_out
+            # save aggregation output
+            graph.dstdata["aggr_cache"] = rst
 
             if self._norm in ["right", "both"]:
                 degs = graph.in_degrees().to(feat_dst).clamp(min=1)
@@ -110,7 +112,7 @@ class GraphConvReduce(dglnn.GraphConv):
             if self._activation is not None:
                 rst = self._activation(rst)
 
-            return rst, aggr_out
+            return rst
         
 
 class GATv2ConvReduce():

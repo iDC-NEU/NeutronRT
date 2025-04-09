@@ -101,8 +101,15 @@ if __name__ == '__main__':
         torch.cuda.manual_seed(0)
         torch.cuda.manual_seed_all(0)
 
+    root = pathlib.Path(cfg.dataset_root)
+
+    if cfg.in_memory:
+        cached_dir = pathlib.Path('cache')
+    else:
+        cached_dir = root.joinpath('.cache')
+
     logging.info('dataloading begin')
-    g = download_dataset(cfg.dataset_name, cfg.dataset_root)
+    g = download_dataset(cfg.dataset_name, root, cached_dir)
     logging.info('dataloading end')
     logging.info(f'graph: {g}')
     logging.info(f'ntypes: {g.ntypes}')
@@ -110,13 +117,14 @@ if __name__ == '__main__':
     logging.info(f'label: {tsstr(g.ndata["label"])}')
 
     logging.info(f'create random update edges')
-    cached_update_file = pathlib.Path(f'{cfg.dataset_root}/.cache/{g.num_edges()}.{cfg.bs_update}.{cfg.num_snapshots}.update')
-    if cached_update_file.is_file():
+    cached_update_file = cached_dir.joinpath(f'{g.num_edges()}.{cfg.bs_update}.{cfg.num_snapshots}.update')
+    if cached_dir.is_dir() and cached_update_file.is_file():
         logging.info(f'loading pre generated update file from {cached_update_file}')
         cfg.edges_updated = torch.load(cached_update_file)
     else:
         cfg.edges_updated = split_randperm(g.num_edges(), cfg.bs_update, cfg.num_snapshots)
-        torch.save(cfg.edges_updated, cached_update_file)
+        if cached_dir.is_dir():
+            torch.save(cfg.edges_updated, cached_update_file)
 
     num_features = g.ndata['feat'].shape[1]
     num_classes = g.ndata['label'].unique().shape[0]

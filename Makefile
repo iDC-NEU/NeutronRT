@@ -1,5 +1,5 @@
 free-gpus	:=0
-root		:=$(HOME)/.dataset
+root		:=/home/hdd/dataset/ # $(HOME)/.dataset
 model		:=gcn
 dataset		:=ogbn-arxiv
 
@@ -11,10 +11,10 @@ numa_nodes	:=$(numa0) $(numa1) $(numa2) $(numa3)
 numa_use	:=$(word 4,$(numa_nodes))
 numa_bind	:=taskset -c $(numa_use)
 
-A			:=--num-epochs 1 --bs-compute 16384 --numa $(numa_use)
+A			:=--num-epochs 1 --bs-compute 16384
 
 run:
-	$(numa_bind) python main.py $(A) \
+	python main.py $(A) \
 	--gpu $(free-gpus) --root $(root) \
 	--model $(model) --dataset $(dataset)
 	

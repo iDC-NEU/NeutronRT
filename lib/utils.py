@@ -13,7 +13,7 @@ import torch
 import numpy as np
 
 # types
-from typing import List
+from typing import List, Optional
 from dgl import DGLGraph
 from dgl.data import AsNodePredDataset, RedditDataset
 from ogb.nodeproppred import DglNodePropPredDataset
@@ -185,12 +185,17 @@ def create_dataset(edge_index: torch.Tensor, **kwargs):
     return CustomNodePredDataset(g, num_classes)
     
 
-def download_dataset(dataset: str, root: pathlib.Path) -> DGLGraph:
+def download_dataset(dataset: str, root: pathlib.Path, cached_dir: Optional[pathlib.Path] = None) -> DGLGraph:
     if isinstance(root, str):
         root = pathlib.Path(root)
 
-    graph_cache_path = root.joinpath(f'.cache/{dataset}.graph')
-    if graph_cache_path.is_file():
+    if cached_dir is None:
+        cached_dir = root.joinpath(f'.cache')
+    elif isinstance(cached_dir, str):
+        cached_dir = pathlib.Path(cached_dir)
+
+    graph_cache_path = cached_dir.joinpath(f'{dataset}.graph')
+    if cached_dir.is_dir() and graph_cache_path.is_file():
         logging.info(f'loading data from {graph_cache_path}')
         g = torch.load(graph_cache_path, map_location='cpu')
         return g
@@ -250,7 +255,8 @@ def download_dataset(dataset: str, root: pathlib.Path) -> DGLGraph:
     g.create_formats_()
     g.pin_memory_()
 
-    torch.save(g, graph_cache_path)
+    if cached_dir.is_dir():
+        torch.save(g, graph_cache_path)
     return g
 
 

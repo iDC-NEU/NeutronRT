@@ -166,7 +166,7 @@ class GCN(BasicModel):
                 use_uva=cfg.use_uva,
             )
 
-            if nloader.device == torch.device('cpu'):
+            if cfg.numa is not None and nloader.device == torch.device('cpu'):
                 nloader.enable_cpu_affinity(
                     loader_cores=cfg.numa[:24],
                     compute_cores=cfg.numa[24:],
@@ -257,12 +257,7 @@ class GCN(BasicModel):
                     si.clk_begin('compute')
                     if layer_idx != self.num_layers - 1:
                         h = self.dropout(h)
-
                     h = layer(block, h)
-
-                    if self.model_name == 'gat':
-                        # use mean for now
-                        h = torch.mean(h, dim=1)
                     si.clk_end('compute')
 
                     if layer_idx != self.num_layers - 1:
@@ -344,20 +339,16 @@ class GCN(BasicModel):
                 si.clk_begin('total')
                 for it, (input_nodes, output_nodes, blocks) in enumerate(nloader):
                     h = cur_h_cache.fetch(input_nodes, 'cuda')
-                    a = cur_a_cache.fetch(output_nodes, 'cuda')
 
                     # only sample 1 hop
                     assert len(blocks) == 1, 'multi-hop sample'
                     block = blocks[0]
+                    block.dstdata['aggr_cache'] = cur_a_cache.fetch(output_nodes, 'cuda')
 
                     si.clk_begin('compute')
                     if layer_idx != self.num_layers - 1:
                         h = self.dropout(h)
-                    h, a = layer(block, h, a)
-
-                    if self.model_name == 'gat':
-                        # use mean for now
-                        h = torch.mean(h, dim=1)
+                    h = layer(block, h)
                     si.clk_end('compute')
 
                     if layer_idx != self.num_layers - 1:
@@ -365,7 +356,7 @@ class GCN(BasicModel):
                         
                         output_nodes = output_nodes.to(nxt_h_cache.cache.device)
                         nxt_h_cache.cache[output_nodes].copy_(h, non_blocking=True)
-                        cur_a_cache.cache[output_nodes].copy_(a, non_blocking=True)
+                        cur_a_cache.cache[output_nodes].copy_(block.dstdata['aggr_cache'], non_blocking=True)
 
                     si.clk_end('total')
 
