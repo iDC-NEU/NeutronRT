@@ -509,7 +509,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dataset_dir",
         type=str,
-        default="/home/hdd/lhr/dglds",
+        default="/home/hdd/dataset",
         help="Root directory of dataset.",
     )
     args = parser.parse_args()

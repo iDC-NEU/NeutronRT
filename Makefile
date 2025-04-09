@@ -1,6 +1,6 @@
 free-gpus	:=2
-root		:=/home/hdd/lhr/dataset # ./dataset # 
-workspace	:=/home/lhr/gnn-inference
+root		:=/home/hdd/dataset # ./dataset # 
+workspace	:=$(HOME)/gnn-inference
 model		:=gcn
 dataset		:=ogbn-products
 A			?=
