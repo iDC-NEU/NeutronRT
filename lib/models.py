@@ -1679,6 +1679,7 @@ class MONET(BasicModel):
         si.summary(rounds=cfg.num_snapshots)
 
 
+# only support mean on multi-heads
 class GAT(BasicModel):
     def __init__(
             self,
@@ -1688,7 +1689,7 @@ class GAT(BasicModel):
             num_hiddens: int,
             num_classes: int,
             conv: Type[dglnn.GraphConv],
-            dropout: float = 0.5,
+            num_heads: int = 1,
     ):
         super().__init__(model_name, num_layers)
         super().__setattr__('num_features', num_features)
@@ -1698,15 +1699,13 @@ class GAT(BasicModel):
         logging.debug(f'model creation begin')
         logging.debug(f'{num_layers} layers')
         logging.debug(f'dims: ({num_features}, {num_hiddens}, {num_classes})')
-        logging.debug(f'dropout: {dropout}')
 
         self.layers = nn.ModuleList()
-        self.layers.append(conv(num_features, num_hiddens, activation=F.relu))
+        self.layers.append(conv(num_features, num_hiddens, num_heads, activation=F.elu))
         for _ in range(num_layers - 2):
-            self.layers.append(conv(num_hiddens, num_hiddens, activation=F.relu))
-        self.layers.append(conv(num_hiddens, num_classes))
+            self.layers.append(conv(num_hiddens, num_hiddens, num_heads, activation=F.elu))
+        self.layers.append(conv(num_hiddens, num_classes, num_heads))
 
-        self.dropout = nn.Dropout(p=dropout)
         logging.debug(f'model creation end')
     
 
@@ -1763,9 +1762,8 @@ class GAT(BasicModel):
                     block = block.to('cuda')
                     h = h_list[it].to('cuda')
                     si.clk_begin('compute')
-                    if layer_idx != self.num_layers - 1:
-                        h = self.dropout(h)
                     h = layer(block, h)
+                    h = h.mean(1)
                     si.clk_end('compute')
                     h_list[it] = h
                 si.clk_end('total')
@@ -1837,9 +1835,8 @@ class GAT(BasicModel):
                     block = blocks[0]
 
                     si.clk_begin('compute')
-                    if layer_idx != self.num_layers - 1:
-                        h = self.dropout(h)
                     h = layer(block, h)
+                    h = h.mean(1)
                     si.clk_end('compute')
 
                     if layer_idx != self.num_layers - 1:
@@ -1928,9 +1925,8 @@ class GAT(BasicModel):
                     block.dstdata['aggr_cache'] = cur_a_cache.fetch(output_nodes, 'cuda')
 
                     si.clk_begin('compute')
-                    if layer_idx != self.num_layers - 1:
-                        h = self.dropout(h)
                     h = layer(block, h)
+                    h = h.mean(1)
                     si.clk_end('compute')
 
                     if layer_idx != self.num_layers - 1:
