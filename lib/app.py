@@ -105,6 +105,7 @@ def r_partial(pidx: int, cfg: Config, g: DGLGraph, model: nn.Module):
     if model.model_name == 'gcn':
         num_final = min(cfg.num_hiddens, cfg.num_classes)
 
+
     caches.build_aggr_cache(cfg, g, num_final)
     logging.info(f'cache built with {free_ram() - fram} GB memory used')
 
