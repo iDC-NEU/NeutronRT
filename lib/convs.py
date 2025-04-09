@@ -127,7 +127,7 @@ class GINConvReduce(dglnn.GINConv):
         super().__init__(apply_func, aggregator_type, init_eps, learn_eps, activation)
 
 
-    def forward(self, graph: DGLGraph, feat: Tensor, a_cache: torch.Tensor, edge_weight = None):
+    def forward(self, graph: DGLGraph, feat: Tensor, edge_weight = None):
         _reducer = getattr(fn, self._aggregator_type)
         with graph.local_scope():
             aggregate_fn = fn.copy_u("h", "m")
@@ -140,13 +140,12 @@ class GINConvReduce(dglnn.GINConv):
             graph.srcdata["h"] = feat_src
             graph.update_all(aggregate_fn, _reducer("m", "neigh"))
             
-            partial_aggr_out = graph.dstdata["neigh"]
-            aggr_out = partial_aggr_out + a_cache
-            rst = (1 + self.eps) * feat_dst + aggr_out
+            graph.dstdata["aggr_cache"] = graph.dstdata["neigh"] + graph.dstdata["aggr_cache"]
+            rst = (1 + self.eps) * feat_dst + graph.dstdata["aggr_cache"]
 
             if self.apply_func is not None:
                 rst = self.apply_func(rst)
             # activation
             if self.activation is not None:
                 rst = self.activation(rst)
-            return rst, aggr_out
+            return rst

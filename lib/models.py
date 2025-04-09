@@ -348,7 +348,7 @@ class GCN(BasicModel):
                     si.clk_begin('compute')
                     if layer_idx != self.num_layers - 1:
                         h = self.dropout(h)
-                    h, a = layer(block, h, a)
+                    h = layer(block, h)
                     si.clk_end('compute')
 
                     if layer_idx != self.num_layers - 1:
@@ -356,7 +356,7 @@ class GCN(BasicModel):
                         
                         output_nodes = output_nodes.to(nxt_h_cache.cache.device)
                         nxt_h_cache.cache[output_nodes].copy_(h, non_blocking=True)
-                        cur_a_cache.cache[output_nodes].copy_(a, non_blocking=True)
+                        cur_a_cache.cache[output_nodes].copy_(block.dstdata['aggr_cache'], non_blocking=True)
 
                     si.clk_end('total')
 
@@ -650,7 +650,7 @@ class GIN(BasicModel):
             affect_edges = update_batch.to(g.device)
             subg = dgl.graph((src[affect_edges], dst[affect_edges]), num_nodes=g.num_nodes(), device=g.device)
 
-            for layer_idx, (layer, norm) in enumerate((self.layers, self.norms)):
+            for layer_idx, (layer, norm) in enumerate(zip(self.layers, self.norms)):
                 logging.debug(f'affect edges #{layer_idx}: {tsstr(affect_edges)}')
 
                 cur_h_cache = caches.h_cache[layer_idx]
@@ -680,14 +680,14 @@ class GIN(BasicModel):
                 si.clk_begin('total')
                 for it, (input_nodes, output_nodes, blocks) in enumerate(nloader):
                     h = cur_h_cache.fetch(input_nodes, 'cuda')
-                    a = cur_a_cache.fetch(output_nodes, 'cuda')
 
                     # only sample 1 hop
                     assert len(blocks) == 1, 'multi-hop sample'
                     block = blocks[0]
+                    block.dstdata['aggr_cache'] = cur_a_cache.fetch(output_nodes, 'cuda')
 
                     si.clk_begin('compute')
-                    h, a = layer(block, h, a)
+                    h = layer(block, h)
                     h = norm(h)
                     h = F.relu(h)
                     h = self.dropout(h)

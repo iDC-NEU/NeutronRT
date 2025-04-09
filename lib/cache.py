@@ -2,8 +2,8 @@ import logging
 import torch
 
 # types
+from typing import List, Optional
 from dgl import DGLGraph
-from typing import List
 
 # self defined
 from lib.config import Config
@@ -62,9 +62,14 @@ class Cache():
             self,
             cfg: Config,
             g: DGLGraph,
+            num_final: Optional[int] = None,
+            
     ):
+        if num_final is None:
+            num_final = cfg.num_hiddens
+
         for i in range(cfg.num_layers):
-            num_dim = cfg.num_hiddens if cfg.num_layers - i > 1 else cfg.num_classes
+            num_dim = cfg.num_hiddens if cfg.num_layers - i > 1 else num_final
 
             self.a_cache.append(
                 LayerCache(
