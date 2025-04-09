@@ -1,28 +1,90 @@
-free-gpus	:=0
-root		:=/home/hdd/dataset/ # $(HOME)/.dataset
-model		:=gat
-dataset		:=ogbn-arxiv
+free-gpus	:=2
+root		:=/home/hdd/lhr/dataset # ./dataset # 
+workspace	:=/home/lhr/gnn-inference
+model		:=gcn
+dataset		:=ogbn-products
+A			?=
+T			?=
 
-numa0		:=0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119
-numa1		:=24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143
-numa2		:=48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160,161,162,163,164,165,166,167
-numa3		:=72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,168,169,170,171,172,173,174,175,176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191
-numa_nodes	:=$(numa0) $(numa1) $(numa2) $(numa3)
-numa_use	:=$(word 4,$(numa_nodes))
-numa_bind	:=taskset -c $(numa_use)
+.PHONY: clean-cache
+.PHONY: part big sample test
 
-A			:=--num-epochs 1 --bs-compute 16384
+# pip install torch==2.4.0 --index-url https://download.pytorch.org/whl/cu124
+# pip install torch_geometric
+# pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.6.0+cu124.html
+# pip install dgl -f https://data.dgl.ai/wheels/torch-2.4/cu124/repo.html
+# pip install ogb pandas
 
-run:
-	python main.py $(A) \
+# sample
+
+sample:
+	python sample-infer-lite.py $(A) \
 	--gpu $(free-gpus) --root $(root) \
 	--model $(model) --dataset $(dataset)
 
+sample55:
+	python sample-infer-lite.py $(A) \
+	--gpu $(free-gpus) --root $(root) \
+	--model $(model) --dataset $(dataset) \
+	--sample 5,5
 
-clean-logs:
-	rm logs/NeutronRT.log
-	rm logs/NeutronRT.perf.log
+count-sample:
+	python sample-infer-count.py $(A) \
+	--gpu $(free-gpus) --root $(root) \
+	--model $(model) --dataset $(dataset)
 
+count-sample55:
+	python sample-infer-count.py $(A) \
+	--gpu $(free-gpus) --root $(root) \
+	--model $(model) --dataset $(dataset) \
+	--sample 5,5
+
+# embedding cache only
+eco:
+	python eco-infer-lite.py $(A) \
+	--gpu $(free-gpus) --root $(root) \
+	--model $(model) --dataset $(dataset) \
+	--embd-host-ratio 0,0 \
+	--embd-cuda-ratio 1,1
+
+count-eco:
+	python eco-infer-count.py $(A) \
+	--gpu $(free-gpus) --root $(root) \
+	--model $(model) --dataset $(dataset) \
+	--embd-host-ratio 0,0 \
+	--embd-cuda-ratio 1,1
+
+big-eco:
+	python eco-infer-lite.py $(A) \
+	--gpu $(free-gpus) --root $(root) \
+	--model $(model) --dataset $(dataset) \
+	--embd-host-ratio 1,1 \
+	--embd-cuda-ratio 0,0
+
+count-big-eco:
+	python eco-infer-count.py $(A) \
+	--gpu $(free-gpus) --root $(root) \
+	--model $(model) --dataset $(dataset) \
+	--embd-host-ratio 1,1 \
+	--embd-cuda-ratio 0,0
+
+part:
+	python part-infer.py $(A) \
+	--gpu $(free-gpus) --root $(root) \
+	--model $(model) --dataset $(dataset) \
+	--embd-cuda-ratio 1,1 \
+	--aggr-cuda-ratio 1,1
+
+big-part:
+	python part-infer.py $(A) \
+	--gpu $(free-gpus) --root $(root) \
+	--model $(model) --dataset $(dataset) \
+	--embd-cuda-ratio 0,0 \
+	--aggr-cuda-ratio 0,0
+
+	
+# test:
+# 	PYTHONPATH=$(workspace) python $(T)
 
 clean-cache:
-	rm -rf lib/__pycache__
+	rm -rf $(strip $(root))/.gnn-stream
