@@ -1,0 +1,27 @@
+# gin sage
+# gcn
+# gat
+model = "gcn"
+fanouts = [-1, -1]
+model_dims = [128, 128]
+layerwise = true
+
+# ogbn-arxiv ogbn-products reddit
+# ogbn-papers100M twitter friendster
+dataset = "ogbn-arxiv"
+in_memory = true
+
+root = "/home/hdd/dataset"
+log = "logs"
+graph_ip_config = "config/graph_ip_config.txt"
+inference_ip_config = "config/inference_ip_config.txt"
+
+
+world_size = 3
+num_graph_devices = 1
+
+devices = [0, 1, 2]
+
+[env]
+MASTER_ADDR = "127.0.0.1"
+MASTER_PORT = 29500
