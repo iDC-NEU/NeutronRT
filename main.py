@@ -140,11 +140,11 @@ def run(
     model.eval()
 
     print(f'Rank {rank}: Begin> {time.perf_counter():.4f}')
-    with g.local_scope():
-        records = handle_update(rank, world_size, g, feats, model, method, samplers)
+    handle_update(rank, world_size, g, feats, model, method, samplers)
     th.cuda.synchronize()
     print(f'Rank {rank}: End> {time.perf_counter():.4f}')
-            
+    
+    th.cuda.empty_cache()
     dist.destroy_process_group()
      
      
@@ -186,7 +186,6 @@ if __name__ == '__main__':
     config['model']['num_features'] = features.shape[1]
     config['model']['num_classes'] = int(labels.max().item() + 1)
 
-    samplers = [NeighborSampler([f]) for f in config['model']['fanouts']]
     
     if not config['dataset']['in_memory']:
         print("Moving graph to shared memory...")
@@ -229,15 +228,33 @@ if __name__ == '__main__':
     world_size = config['dist']['world_size']
     print(f"Spawning {world_size} processes...")
 
-    method: Method = load_method(config['parameter']['method'])(config['model']['num_layers'])
-    th.cuda.synchronize()
-    affxt_time = time.perf_counter()
-    method.affect_analysis(graph, updates, samplers, config['model']['use_softmax'])
-    th.cuda.synchronize()
-    affxt_time = time.perf_counter() - affxt_time
-    print(f"Main: Time> Affect: {affxt_time:.4f},")
+    test_cases = [
+        # warm up gpu
+        {'method': 'smp',   'fanouts': [1, 1],      },
 
-    parallel_time = time.perf_counter()
-    mp.spawn(run, args=(world_size, config, graph, feats, labels, method, samplers), nprocs=world_size, join=True)
-    parallel_time = time.perf_counter() - parallel_time
-    print(f"Inference completed.")
+        {'method': 'inc',   'fanouts': [-1, -1],    },
+        {'method': 'smp',   'fanouts': [5, 5],      },
+        {'method': 'smp',   'fanouts': [10, 10],    },
+        {'method': 'cache', 'fanouts': [-1, -1],    },
+        {'method': 'smp',   'fanouts': [-1, -1],    },
+    ]
+
+    for test_id, case in enumerate(test_cases):
+        for k, v in case.items():
+            config['parameter'][k] = v
+
+        print(f"Inference #{test_id} {config['parameter']['method']} {config['parameter']['fanouts']} begin.")
+
+        method: Method = load_method(config['parameter']['method'])(config['model']['num_layers'])
+        samplers = [NeighborSampler([f]) for f in config['parameter']['fanouts']]
+        th.cuda.synchronize()
+        affxt_time = time.perf_counter()
+        method.affect_analysis(graph, updates, samplers, config['model']['use_softmax'])
+        th.cuda.synchronize()
+        affxt_time = time.perf_counter() - affxt_time
+        print(f"Main: Time> Affect: {affxt_time:.4f},")
+
+        parallel_time = time.perf_counter()
+        mp.spawn(run, args=(world_size, config, graph, feats, labels, method, samplers), nprocs=world_size, join=True)
+        parallel_time = time.perf_counter() - parallel_time
+        print(f"Inference #{test_id} completed in {parallel_time}s.")
