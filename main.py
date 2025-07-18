@@ -161,7 +161,6 @@ if __name__ == '__main__':
     print(config)
     print("---------------------")
     
-    # 设置环境变量
     for k, v in config['env'].items():
         os.environ[k] = str(v)
 
