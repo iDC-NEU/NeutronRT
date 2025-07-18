@@ -14,7 +14,8 @@ import torch.multiprocessing as mp
 
 from lib.dataset import load_dataset
 from lib.graph import random_eidperm
-from lib.methods import load_method, Method
+from lib.methods import load_method, Method, Incremental
+from lib.models import GNNModel
 
 # types
 from dgl.dataloading import DataLoader, NeighborSampler
@@ -22,45 +23,6 @@ from torch.nn.parallel import DistributedDataParallel
 from ogb.nodeproppred import DglNodePropPredDataset
 from typing import Any, List, Dict
 from dgl.heterograph import DGLBlock
-
-class GNNModel(nn.Module):
-    def __init__(self, model_name: str, in_size: int, hid_size: int, out_size: int, num_layers: int):
-        super().__init__()
-        super().__setattr__('num_layers', num_layers)
-        super().__setattr__('num_features', in_size)
-        super().__setattr__('num_hiddens', hid_size)
-        super().__setattr__('num_classes', out_size)
-
-        self.layers = nn.ModuleList()
-        # 根据配置选择不同的GNN层
-        for i in range(num_layers):
-            in_hidden = in_size if i == 0 else hid_size
-            out_hidden = out_size if i == num_layers - 1 else hid_size
-            
-            if model_name.lower() == "sage":
-                self.layers.append(dglnn.SAGEConv(in_hidden, out_hidden, 'mean'))
-            elif model_name.lower() == "gcn":
-                # GCN不直接支持DGL的block结构，但SAGEConv可以模拟
-                self.layers.append(dglnn.GraphConv(in_hidden, out_hidden))
-            elif model_name.lower() == "gat":
-                # 注意：GAT通常需要指定头数(num_heads)
-                self.layers.append(dglnn.GATConv(in_hidden, out_hidden, num_heads=4))
-            else:
-                raise ValueError(f"Unsupported model name: {model_name}")
-        
-        self.hid_size = hid_size
-        self.out_size = out_size
-
-    def forward(self, layer_idx: int, block: DGLBlock, h: th.Tensor) -> th.Tensor:
-        layer = self.layers[layer_idx]
-        h_dst = h[:block.number_of_dst_nodes()]
-        h = layer(block, (h, h_dst))
-        # GAT的输出需要特殊处理
-        if isinstance(layer, dglnn.GATConv):
-            h = h.mean(1) # 对多头注意力结果取平均
-        if layer_idx < len(self.layers) - 1:
-            h = F.relu(h)
-        return h
 
 
 def build_embd_cache(
@@ -119,16 +81,24 @@ def build_aggr_cache(
 def handle_update(
         rank: int,
         world_size: int,
-        config: Dict[str, Any],
         g: dgl.DGLGraph,
         feats: th.Tensor,
         ddp: DistributedDataParallel,
         m: Method,
         samplers: List[NeighborSampler],
 ):
+    for idx, layer_nodes in enumerate(m.collect_nodes):
+        for layer_idx, nodes in enumerate(layer_nodes):
+            m.collect_nodes[idx][layer_idx] = nodes[rank::world_size]
+
+    if isinstance(m, Incremental) and ddp.module.use_softmax:
+        for idx, layer_nodes in enumerate(m.collect_recomputed):
+            for layer_idx, nodes in enumerate(layer_nodes):
+                m.collect_recomputed[idx][layer_idx] = nodes[rank::world_size]
+
     th.cuda.synchronize()
     total_time = time.perf_counter()
-    
+
     with th.no_grad():
         compt_time = m.layerwise_inference(g, ddp, samplers, feats)
 
@@ -155,21 +125,15 @@ def run(
     print(f"Starting process {rank}/{world_size}...")
     dist.init_process_group(backend='nccl', world_size=world_size, rank=rank)
     th.cuda.set_device(rank)
-    if config['dataset']['in_memory']:
-        g = g.to('cuda')
-
-    for i in range(len(method.collect_nodes)):
-        for j in range(len(method.collect_nodes[i])):
-            targets = th.where(method.collect_nodes[i][j])[0]
-            local_targets = targets[rank::world_size]
-            method.collect_nodes[i][j] = local_targets
 
     model = GNNModel(
         model_name=config['model']['name'],
-        in_size=config['model']['num_features'],
-        hid_size=config['model']['num_hiddens'],
-        out_size=config['model']['num_classes'],
-        num_layers=config['model']['num_layers']
+        num_features=config['model']['num_features'],
+        num_hiddens=config['model']['num_hiddens'],
+        num_classes=config['model']['num_classes'],
+        num_layers=config['model']['num_layers'],
+        use_softmax=config['model']['use_softmax'],
+        **config['model']['kwargs']
     ).to(rank)
     
     model = DistributedDataParallel(model, device_ids=[rank])
@@ -177,7 +141,7 @@ def run(
 
     print(f'Rank {rank}: Begin> {time.perf_counter():.4f}')
     with g.local_scope():
-        records = handle_update(rank, world_size, config, g, feats, model, method, samplers)
+        records = handle_update(rank, world_size, g, feats, model, method, samplers)
     th.cuda.synchronize()
     print(f'Rank {rank}: End> {time.perf_counter():.4f}')
             
@@ -230,6 +194,11 @@ if __name__ == '__main__':
         graph = graph.shared_memory(config['shared']['shm_name'])
         labels.share_memory_()
         features.share_memory_()
+    else:
+        print("Moving graph to device side...")
+        graph = graph.to('cuda')
+        labels = labels.cuda()
+        features = features.cuda()
 
     hcaches = build_embd_cache(
         config['model']['num_layers'],
@@ -241,6 +210,7 @@ if __name__ == '__main__':
         features.dtype
     )
     hcaches.insert(0, features)
+    print(f'h caches: {hcaches}')
 
     acaches = build_aggr_cache(
         config['model']['name'],
@@ -253,15 +223,21 @@ if __name__ == '__main__':
         not config['dataset']['in_memory'],
         features.dtype
     )
+    print(f'a caches: {acaches}')
+
     feats = (hcaches, acaches)
 
     world_size = config['dist']['world_size']
     print(f"Spawning {world_size} processes...")
 
     method: Method = load_method(config['parameter']['method'])(config['model']['num_layers'])
-    for update in updates:
-        method.affect_analysis(graph, update, samplers)
-    
+    th.cuda.synchronize()
+    affxt_time = time.perf_counter()
+    method.affect_analysis(graph, updates, samplers, config['model']['use_softmax'])
+    th.cuda.synchronize()
+    affxt_time = time.perf_counter() - affxt_time
+    print(f"Main: Time> Affect: {affxt_time:.4f},")
+
     parallel_time = time.perf_counter()
     mp.spawn(run, args=(world_size, config, graph, feats, labels, method, samplers), nprocs=world_size, join=True)
     parallel_time = time.perf_counter() - parallel_time

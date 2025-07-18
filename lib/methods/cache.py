@@ -12,22 +12,19 @@ class Cache(Basic):
         super().__init__(num_layers)
 
 
-    def affect_analysis(self, g, update, samplers):
-        affected_nodes_map = th.zeros(g.num_nodes(), dtype=th.bool, device=g.device)
-        affected_nodes = [None for _ in range(self.num_layers)]
-
+    def affect_analysis(self, g, updates, samplers, use_softmax = False):
         src, dst = g.edges()
-        targets = dst[update.to(g.device)]
-        
-        for layer_idx in range(self.num_layers):
-            targets = targets.unique()
-            affected_nodes_map[targets] = True
-            affected_nodes[layer_idx] = affected_nodes_map.clone()
+        for upidx, update in enumerate(updates):
+            targets = dst[update.to(g.device)]
+            affected_nodes = [None for _ in range(self.num_layers)]
+            for layer_idx in range(self.num_layers):
+                targets = targets.unique()
+                affected_nodes[layer_idx] = targets
 
-            if layer_idx != self.num_layers - 1:
-                _, targets = g.out_edges(targets)
+                if layer_idx != self.num_layers - 1:
+                    _, targets = g.out_edges(targets)
 
-        self.collect_nodes.append(affected_nodes)
+            self.collect_nodes.append(affected_nodes)
     
 
     def layerwise_inference(self, g, ddp, samplers, feats):

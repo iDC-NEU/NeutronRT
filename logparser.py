@@ -7,7 +7,7 @@ keywords = [
 ]
 
 methods = [
-    'SMP5', 'SMP10', 'FULL', 'CACHE', 'INC'
+    'INC', 'SMP5', 'SMP10', 'CACHE', 'FULL'
 ]
 
 def log_handler(path: P):

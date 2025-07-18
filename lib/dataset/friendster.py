@@ -64,7 +64,7 @@ class FriendsterDataset(DGLDataset):
             data=(u, v),
             num_nodes=num_nodes,
         )
-        self._graph = dgl.to_bidirected(self._graph)
+        # self._graph = dgl.to_bidirected(self._graph)
 
         features = dummy_feat(num_nodes, NUM_FEATURES)
         labels = dummy_label(num_nodes, NUM_CLASSES)

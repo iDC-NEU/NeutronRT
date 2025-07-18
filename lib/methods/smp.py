@@ -12,36 +12,81 @@ class Sample(Basic):
         super().__init__(num_layers)
 
 
-    def affect_analysis(self, g, update, samplers):
+    def affect_analysis(self, g, updates, samplers, use_softmax = False):
         affected_nodes_map = th.zeros(g.num_nodes(), dtype=th.bool, device=g.device)
-        affected_nodes = [None for _ in range(self.num_layers)]
 
         src, dst = g.edges()
-        targets = dst[update.to(g.device)]
-        for layer_idx in range(self.num_layers):
-            targets = targets.unique()
-            if layer_idx != self.num_layers - 1:
-                _, targets = g.out_edges(targets)
+        for upidx, update in enumerate(updates):
+            update = update.to(g.device)
+            targets = dst[update]
 
-        affected_nodes_map[targets] = True
-        for layer_idx in reversed(range(self.num_layers)):
-            affected_nodes[layer_idx] = affected_nodes_map.clone()
+            # get final affected nodes
+            for layer_idx in range(self.num_layers):
+                targets = targets.unique(sorted=False)
+                if layer_idx != self.num_layers - 1:
+                    _, targets = g.out_edges(targets)
 
-            if layer_idx != 0:
-                nloader = DataLoader(
-                    g, th.where(affected_nodes_map)[0], samplers[layer_idx],
-                    device=g.device,
-                    batch_size=1024 * 1024 * 8,
-                    shuffle=False,
-                    drop_last=False,
-                    num_workers=0,
-                )
+            affected_nodes = [None for _ in range(self.num_layers)]
+            for layer_idx in reversed(range(self.num_layers)):
+                affected_nodes[layer_idx] = targets
 
-                affected_nodes_map.zero_()
-                for innodes, outnodes, blocks in nloader:
-                    affected_nodes_map[innodes] = True
+                if layer_idx != 0:
+                    nloader = DataLoader(
+                        g, targets, samplers[layer_idx],
+                        device=g.device,
+                        batch_size=1024 * 1024 * 8,
+                        shuffle=False,
+                        drop_last=False,
+                        num_workers=0,
+                    )
 
-        self.collect_nodes.append(affected_nodes)
+                    affected_nodes_map.zero_()
+                    for innodes, outnodes, blocks in nloader:
+                        affected_nodes_map[innodes] = True
+
+                    targets = th.where(affected_nodes_map)[0]
+
+            self.collect_nodes.append(affected_nodes)
+
+
+    def odec_affect_analysis(self, g, updates, samplers, num_odec):
+        affected_nodes_map = th.zeros(g.num_nodes(), dtype=th.bool, device=g.device)
+
+        src, dst = g.edges()
+        for upidx, update in enumerate(updates):
+            update = update.to(g.device)
+            targets = dst[update]
+
+            # get final affected nodes
+            for layer_idx in range(self.num_layers):
+                targets = targets.unique(sorted=False)
+                if layer_idx != self.num_layers - 1:
+                    _, targets = g.out_edges(targets)
+
+            num_odec = min(num_odec, targets.shape[0])
+            targets = targets[:num_odec]
+
+            affected_nodes = [None for _ in range(self.num_layers)]
+            for layer_idx in reversed(range(self.num_layers)):
+                affected_nodes[layer_idx] = targets
+
+                if layer_idx != 0:
+                    nloader = DataLoader(
+                        g, targets, samplers[layer_idx],
+                        device=g.device,
+                        batch_size=1024 * 1024 * 8,
+                        shuffle=False,
+                        drop_last=False,
+                        num_workers=0,
+                    )
+
+                    affected_nodes_map.zero_()
+                    for innodes, outnodes, blocks in nloader:
+                        affected_nodes_map[innodes] = True
+
+                    targets = th.where(affected_nodes_map)[0]
+
+            self.collect_nodes.append(affected_nodes)
 
 
 
