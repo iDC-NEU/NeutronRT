@@ -143,10 +143,9 @@ def run(
     handle_update(rank, world_size, g, feats, model, method, samplers)
     th.cuda.synchronize()
     print(f'Rank {rank}: End> {time.perf_counter():.4f}')
-    
+
     th.cuda.empty_cache()
     dist.destroy_process_group()
-     
      
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -172,6 +171,7 @@ if __name__ == '__main__':
     print("Loading dataset...")
     dataset = load_dataset(config['dataset']['name'], config['file']['root'])
     graph: dgl.DGLGraph = dataset[0]
+    graph = dgl.add_self_loop(graph)
     graph.create_formats_()
 
     updates = random_eidperm(graph.num_edges(), config['parameter']['bs_update'], config['parameter']['num_snapshots'])
@@ -208,7 +208,8 @@ if __name__ == '__main__':
         features.dtype
     )
     hcaches.insert(0, features)
-    print(f'h caches: {hcaches}')
+    for idx, cache in enumerate(hcaches):
+        print(f'h caches #{idx}: {cache.shape}@{cache.device}')
 
     acaches = build_aggr_cache(
         config['model']['name'],
@@ -221,7 +222,8 @@ if __name__ == '__main__':
         not config['dataset']['in_memory'],
         features.dtype
     )
-    print(f'a caches: {acaches}')
+    for idx, cache in enumerate(acaches):
+        print(f'a caches #{idx}: {cache.shape}@{cache.device}')
 
     feats = (hcaches, acaches)
 
@@ -255,6 +257,9 @@ if __name__ == '__main__':
         print(f"Main: Time> Affect: {affxt_time:.4f},")
 
         parallel_time = time.perf_counter()
-        mp.spawn(run, args=(world_size, config, graph, feats, labels, method, samplers), nprocs=world_size, join=True)
+        if world_size > 1 and len(test_cases) == 1:
+            mp.spawn(run, args=(world_size, config, graph, feats, labels, method, samplers), nprocs=world_size, join=True)
+        else:
+            run(0, world_size, config, graph, feats, labels, method, samplers)
         parallel_time = time.perf_counter() - parallel_time
         print(f"Inference #{test_id} completed in {parallel_time}s.")

@@ -34,7 +34,7 @@ class Sample(Basic):
                     nloader = DataLoader(
                         g, targets, samplers[layer_idx],
                         device=g.device,
-                        batch_size=1024 * 1024 * 8,
+                        batch_size=8192,
                         shuffle=False,
                         drop_last=False,
                         num_workers=0,
@@ -74,7 +74,7 @@ class Sample(Basic):
                     nloader = DataLoader(
                         g, targets, samplers[layer_idx],
                         device=g.device,
-                        batch_size=1024 * 1024 * 8,
+                        batch_size=8192,
                         shuffle=False,
                         drop_last=False,
                         num_workers=0,
@@ -101,7 +101,7 @@ class Sample(Basic):
                 nloader = DataLoader(
                     g, targets, samplers[layer_idx],
                     device=g.device,
-                    batch_size=8192,
+                    batch_size=4096,
                     shuffle=False,
                     drop_last=False,
                     num_workers=0,

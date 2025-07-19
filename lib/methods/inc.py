@@ -71,7 +71,7 @@ class Incremental(Basic):
                 nloader = DataLoader(
                     sg, targets, samplers[layer_idx],
                     device=g.device,
-                    batch_size=8192,
+                    batch_size=1024 * 512,
                     shuffle=False,
                     drop_last=False,
                     num_workers=0,

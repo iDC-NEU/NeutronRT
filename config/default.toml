@@ -7,21 +7,20 @@
     # gin sage
     # gcn
     # gat
-    name = "gat"
+    name = "gcn"
     num_layers = 2
-    fanouts = [5, 5]
     num_hiddens = 128
     layerwise = true
-    use_softmax = true
+    use_softmax = false
 
     [model.kwargs]
-    num_heads = 1
+    # num_heads = 1
 
 [dataset]
     # ogbn-arxiv ogbn-products reddit
     # ogbn-papers100M twitter friendster
-    name = "ogbn-products"
-    in_memory = true
+    name = "friendster"
+    in_memory = false
 
 
 [file]
@@ -37,6 +36,7 @@
 
 
 [parameter]
-    method = 'smp'
+    method = 'inc'
+    fanouts = [-1, -1]
     bs_update = 100_000
     num_snapshots = 10

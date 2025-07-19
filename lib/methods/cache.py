@@ -57,7 +57,7 @@ class Cache(Basic):
                     compt_time += time.perf_counter() - ddp_begin
 
                     if layer_idx != ddp.module.num_layers - 1:
-                        feats[layer_idx][outnodes].copy_(h, non_blocking=True)
+                        feats[layer_idx + 1][outnodes].copy_(h, non_blocking=True)
                     else:
                         h = h.to('cpu')
 
