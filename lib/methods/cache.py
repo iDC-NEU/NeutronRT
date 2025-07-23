@@ -13,6 +13,7 @@ class Cache(Basic):
 
 
     def affect_analysis(self, g, updates, samplers, use_softmax = False):
+        num_final_affected_nodes = 0
         src, dst = g.edges()
         for upidx, update in enumerate(updates):
             targets = dst[update.to(g.device)]
@@ -23,13 +24,19 @@ class Cache(Basic):
 
                 if layer_idx != self.num_layers - 1:
                     _, targets = g.out_edges(targets)
+                else:
+                    num_final_affected_nodes += targets.size(0)
 
             self.collect_nodes.append(affected_nodes)
+
+        return num_final_affected_nodes
     
 
     def layerwise_inference(self, g, ddp, samplers, feats):
         compt_time = 0.0
         feats, _ = feats
+        num_nodes_involved = 0
+        num_edges_involved = 0
 
         for upidx, nodes in enumerate(self.collect_nodes):
             for layer_idx, targets in enumerate(nodes):
@@ -61,4 +68,7 @@ class Cache(Basic):
                     else:
                         h = h.to('cpu')
 
-        return compt_time
+                    num_edges_involved += block.num_edges()
+                    num_nodes_involved += innodes.size(0) + outnodes.size(0)
+
+        return compt_time, num_nodes_involved, num_edges_involved

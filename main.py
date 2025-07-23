@@ -100,7 +100,7 @@ def handle_update(
     total_time = time.perf_counter()
 
     with th.no_grad():
-        compt_time = m.layerwise_inference(g, ddp, samplers, feats)
+        compt_time, num_nodes_involved, num_edges_involved = m.layerwise_inference(g, ddp, samplers, feats)
 
     th.cuda.synchronize()
     total_time = time.perf_counter() - total_time
@@ -108,6 +108,7 @@ def handle_update(
 
     print(f"Rank {rank}: Inference finished.")
     print(f"Rank {rank}: Time> Total: {total_time:.4f}, Compute: {compt_time:.4f}, Sample+Transfer: {st_time:.4f},")
+    print(f"Rank {rank}: Stat> Nodes: {num_nodes_involved}, Edges: {num_edges_involved}, Throughput: {num_edges_involved / total_time:.4f} edges/s,")
 
     return compt_time, st_time
 
@@ -169,7 +170,11 @@ if __name__ == '__main__':
         th.cuda.manual_seed_all(0)
 
     print("Loading dataset...")
-    dataset = load_dataset(config['dataset']['name'], config['file']['root'])
+    dataset_root: str = config['dataset']['root']
+    dataset_root = dataset_root.replace('$HOME', os.getenv('HOME'))
+    config['dataset']['root'] = dataset_root
+
+    dataset = load_dataset(config['dataset']['name'], config['dataset']['root'])
     graph: dgl.DGLGraph = dataset[0]
     graph = dgl.add_self_loop(graph)
     graph.create_formats_()
@@ -192,6 +197,11 @@ if __name__ == '__main__':
         graph = graph.shared_memory(config['shared']['shm_name'])
         labels.share_memory_()
         features.share_memory_()
+
+        # graph = graph.pin_memory_()
+        # labels = labels.pin_memory()
+        
+        # features = features.pin_memory()
     else:
         print("Moving graph to device side...")
         graph = graph.to('cuda')
@@ -251,10 +261,11 @@ if __name__ == '__main__':
         samplers = [NeighborSampler([f]) for f in config['parameter']['fanouts']]
         th.cuda.synchronize()
         affxt_time = time.perf_counter()
-        method.affect_analysis(graph, updates, samplers, config['model']['use_softmax'])
+        num_final_affected_nodes = method.affect_analysis(graph, updates, samplers, config['model']['use_softmax'])
         th.cuda.synchronize()
         affxt_time = time.perf_counter() - affxt_time
         print(f"Main: Time> Affect: {affxt_time:.4f},")
+        print(f"Main: Stat> Final: {num_final_affected_nodes},")
 
         parallel_time = time.perf_counter()
         if world_size > 1 and len(test_cases) == 1:

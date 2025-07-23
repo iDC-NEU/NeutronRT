@@ -19,12 +19,12 @@
 [dataset]
     # ogbn-arxiv ogbn-products reddit
     # ogbn-papers100M twitter friendster
-    name = "friendster"
+    name = "ogbn-products"
+    root = "$HOME/.dataset"
     in_memory = false
 
 
 [file]
-    root = "/home/hdd/dataset"
     logdir = "./logs"
 
 

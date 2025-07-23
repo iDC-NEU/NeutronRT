@@ -13,6 +13,7 @@ class Sample(Basic):
 
 
     def affect_analysis(self, g, updates, samplers, use_softmax = False):
+        num_final_affected_nodes = 0
         affected_nodes_map = th.zeros(g.num_nodes(), dtype=th.bool, device=g.device)
 
         src, dst = g.edges()
@@ -25,6 +26,8 @@ class Sample(Basic):
                 targets = targets.unique(sorted=False)
                 if layer_idx != self.num_layers - 1:
                     _, targets = g.out_edges(targets)
+                else:
+                    num_final_affected_nodes += targets.size(0)
 
             affected_nodes = [None for _ in range(self.num_layers)]
             for layer_idx in reversed(range(self.num_layers)):
@@ -48,8 +51,11 @@ class Sample(Basic):
 
             self.collect_nodes.append(affected_nodes)
 
+        return num_final_affected_nodes
+
 
     def odec_affect_analysis(self, g, updates, samplers, num_odec):
+        num_final_affected_nodes = 0
         affected_nodes_map = th.zeros(g.num_nodes(), dtype=th.bool, device=g.device)
 
         src, dst = g.edges()
@@ -62,6 +68,8 @@ class Sample(Basic):
                 targets = targets.unique(sorted=False)
                 if layer_idx != self.num_layers - 1:
                     _, targets = g.out_edges(targets)
+                else:
+                    num_final_affected_nodes += targets.size(0)
 
             num_odec = min(num_odec, targets.shape[0])
             targets = targets[:num_odec]
@@ -88,6 +96,8 @@ class Sample(Basic):
 
             self.collect_nodes.append(affected_nodes)
 
+        return num_final_affected_nodes
+
 
 
     def layerwise_inference(self, g, ddp, samplers, feats):
@@ -95,6 +105,8 @@ class Sample(Basic):
         feats, _ = feats
         feats = feats[0]
         h_src = None
+        num_nodes_involved = 0
+        num_edges_involved = 0
         for upidx, nodes in enumerate(self.collect_nodes):
             for layer_idx, targets in enumerate(nodes):
 
@@ -139,4 +151,6 @@ class Sample(Basic):
                     else:
                         h = h.to('cpu')
 
-        return compt_time
+                    num_edges_involved += block.num_edges()
+                    num_nodes_involved += innodes.size(0) + outnodes.size(0)
+        return compt_time, num_nodes_involved, num_edges_involved

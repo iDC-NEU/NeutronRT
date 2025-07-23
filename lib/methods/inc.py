@@ -16,6 +16,7 @@ class Incremental(Basic):
 
 
     def affect_analysis(self, g, updates, samplers, use_softmax = False):
+        num_final_affected_nodes = 0
         src, dst = g.edges()
         for upidx, update in enumerate(updates):
             affected_nodes = [None for _ in range(self.num_layers)]
@@ -53,16 +54,22 @@ class Incremental(Basic):
                 if layer_idx != self.num_layers - 1:
                     asrc, adst = g.out_edges(targets)
                     sg.add_edges(asrc, adst)
+                else:
+                    num_final_affected_nodes += targets.size(0)
         
             self.collect_nodes.append(affected_nodes)
             self.collect_subgraphs.append(affected_subgraphs)
             if use_softmax:
                 self.collect_recomputed.append(recomputed_nodes)
 
+        return num_final_affected_nodes
+
 
     def layerwise_inference(self, g, ddp, samplers, feats):
         compt_time = 0.0
         feats, aggrs = feats
+        num_nodes_involved = 0
+        num_edges_involved = 0
 
         for upidx, subgraphs in enumerate(self.collect_subgraphs):
             for layer_idx, sg in enumerate(subgraphs):
@@ -105,6 +112,9 @@ class Incremental(Basic):
                         else:
                             h = h.to('cpu')
 
+                    num_edges_involved += block.num_edges()
+                    num_nodes_involved += innodes.size(0) + outnodes.size(0)
+
                 if ddp.module.use_softmax:
                     targets = self.collect_recomputed[upidx][layer_idx]
 
@@ -134,5 +144,8 @@ class Incremental(Basic):
                             feats[layer_idx][outnodes].copy_(h, non_blocking=True)
                         else:
                             h = h.to('cpu')
-        return compt_time
+
+                        num_edges_involved += block.num_edges()
+                        num_nodes_involved += innodes.size(0) + outnodes.size(0)
+        return compt_time, num_nodes_involved, num_edges_involved
 
