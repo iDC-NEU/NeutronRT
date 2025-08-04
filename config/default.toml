@@ -7,19 +7,20 @@
     # gin sage
     # gcn
     # gat
-    name = "gcn"
+    name = "sage"
     num_layers = 2
     num_hiddens = 128
     layerwise = true
     use_softmax = false
 
     [model.kwargs]
+    aggregator_type = 'mean'
     # num_heads = 1
 
 [dataset]
     # ogbn-arxiv ogbn-products reddit
     # ogbn-papers100M twitter friendster
-    name = "ogbn-products"
+    name = "ogbn-papers100M"
     root = "$HOME/.dataset"
     in_memory = false
 
@@ -38,5 +39,6 @@
 [parameter]
     method = 'inc'
     fanouts = [-1, -1]
-    bs_update = 100_000
+    odec = 0
+    bs_update = 1
     num_snapshots = 10

@@ -115,10 +115,10 @@ def handle_update(
 
 def run(
         rank: int, 
-        world_size: int, 
+        world_size: int,
         config: Dict[str, Any], 
         g: dgl.DGLGraph,
-        feats: th.Tensor, 
+        feats: th.Tensor,
         labels: th.Tensor,
         method: Method,
         samplers: List[NeighborSampler],
@@ -169,7 +169,8 @@ if __name__ == '__main__':
         th.cuda.manual_seed(0)
         th.cuda.manual_seed_all(0)
 
-    print("Loading dataset...")
+    load_time = time.perf_counter()
+    print("loading dataset...")
     dataset_root: str = config['dataset']['root']
     dataset_root = dataset_root.replace('$HOME', os.getenv('HOME'))
     config['dataset']['root'] = dataset_root
@@ -178,6 +179,8 @@ if __name__ == '__main__':
     graph: dgl.DGLGraph = dataset[0]
     graph = dgl.add_self_loop(graph)
     graph.create_formats_()
+    load_time = time.perf_counter() - load_time
+    print(f'done loading in {load_time}s')
 
     updates = random_eidperm(graph.num_edges(), config['parameter']['bs_update'], config['parameter']['num_snapshots'])
 
@@ -189,9 +192,15 @@ if __name__ == '__main__':
     print(f"Labels: {labels.shape}")
 
     config['model']['num_features'] = features.shape[1]
-    config['model']['num_classes'] = int(labels.max().item() + 1)
+
+    try:
+        config['model']['num_classes'] = int(labels.max().item() + 1)
+    except Exception as e:
+        print(e)
+        config['model']['num_classes'] = 40
 
     
+    transf_time = time.perf_counter()
     if not config['dataset']['in_memory']:
         print("Moving graph to shared memory...")
         graph = graph.shared_memory(config['shared']['shm_name'])
@@ -207,7 +216,10 @@ if __name__ == '__main__':
         graph = graph.to('cuda')
         labels = labels.cuda()
         features = features.cuda()
+    transf_time = time.perf_counter() - transf_time
+    print(f'done dataset transfer in {transf_time}s')
 
+    cache_time = time.perf_counter()
     hcaches = build_embd_cache(
         config['model']['num_layers'],
         graph.num_nodes(),
@@ -236,6 +248,8 @@ if __name__ == '__main__':
         print(f'a caches #{idx}: {cache.shape}@{cache.device}')
 
     feats = (hcaches, acaches)
+    cache_time = time.perf_counter() - cache_time
+    print(f'done cache creation in {cache_time}s')
 
     world_size = config['dist']['world_size']
     print(f"Spawning {world_size} processes...")
@@ -243,12 +257,15 @@ if __name__ == '__main__':
     test_cases = [
         # warm up gpu
         {'method': 'smp',   'fanouts': [1, 1],      },
+        # {'method': 'inc',   'fanouts': [-1, -1],    },
+        # {'method': 'smp',   'fanouts': [5, 5],      },
+        # {'method': 'smp',   'fanouts': [10, 10],    },
+        # {'method': 'cache', 'fanouts': [-1, -1],    },
+        # {'method': 'smp',   'fanouts': [-1, -1],    },
 
-        {'method': 'inc',   'fanouts': [-1, -1],    },
-        {'method': 'smp',   'fanouts': [5, 5],      },
-        {'method': 'smp',   'fanouts': [10, 10],    },
-        {'method': 'cache', 'fanouts': [-1, -1],    },
-        {'method': 'smp',   'fanouts': [-1, -1],    },
+        {'method': 'inc',   'fanouts': [-1, -1],    'odec': 1000},
+        {'method': 'inc',   'fanouts': [-1, -1],    'odec': 10000},
+        {'method': 'inc',   'fanouts': [-1, -1],    'odec': 100000},
     ]
 
     for test_id, case in enumerate(test_cases):
@@ -261,11 +278,20 @@ if __name__ == '__main__':
         samplers = [NeighborSampler([f]) for f in config['parameter']['fanouts']]
         th.cuda.synchronize()
         affxt_time = time.perf_counter()
-        num_final_affected_nodes = method.affect_analysis(graph, updates, samplers, config['model']['use_softmax'])
+        if config['parameter']['odec'] == 0:
+            method.affect_analysis(
+                graph, updates, samplers,
+                config['model']['use_softmax']
+            )
+        else:
+            method.odec_affect_analysis(
+                graph, updates, samplers,
+                config['parameter']['odec'],
+                config['model']['use_softmax']
+            )
         th.cuda.synchronize()
         affxt_time = time.perf_counter() - affxt_time
         print(f"Main: Time> Affect: {affxt_time:.4f},")
-        print(f"Main: Stat> Final: {num_final_affected_nodes},")
 
         parallel_time = time.perf_counter()
         if world_size > 1 and len(test_cases) == 1:

@@ -51,10 +51,10 @@ class Sample(Basic):
 
             self.collect_nodes.append(affected_nodes)
 
-        return num_final_affected_nodes
+        print(f"Main: Affect> Final: {num_final_affected_nodes},")
 
 
-    def odec_affect_analysis(self, g, updates, samplers, num_odec):
+    def odec_affect_analysis(self, g, updates, samplers, num_odec, use_softmax = False):
         num_final_affected_nodes = 0
         affected_nodes_map = th.zeros(g.num_nodes(), dtype=th.bool, device=g.device)
 
@@ -96,7 +96,7 @@ class Sample(Basic):
 
             self.collect_nodes.append(affected_nodes)
 
-        return num_final_affected_nodes
+        print(f"Main: Affect> Final: {num_final_affected_nodes},")
 
 
 
@@ -114,7 +114,7 @@ class Sample(Basic):
                     g, targets, samplers[layer_idx],
                     device=g.device,
                     batch_size=4096,
-                    shuffle=False,
+                    shuffle=True,
                     drop_last=False,
                     num_workers=0,
                     use_ddp=True,

@@ -19,7 +19,7 @@ class Cache(Basic):
             targets = dst[update.to(g.device)]
             affected_nodes = [None for _ in range(self.num_layers)]
             for layer_idx in range(self.num_layers):
-                targets = targets.unique()
+                targets = targets.unique(sorted=False)
                 affected_nodes[layer_idx] = targets
 
                 if layer_idx != self.num_layers - 1:
@@ -29,7 +29,44 @@ class Cache(Basic):
 
             self.collect_nodes.append(affected_nodes)
 
-        return num_final_affected_nodes
+        print(f"Main: Affect> Final: {num_final_affected_nodes},")
+
+
+    def odec_affect_analysis(self, g, updates, samplers, num_odec, use_softmax = False):
+        num_final_affected_nodes = 0
+        affected_nodes_map = th.zeros(g.num_nodes(), dtype=th.bool, device=g.device)
+        src, dst = g.edges()
+        for upidx, update in enumerate(updates):
+            targets = dst[update.to(g.device)]
+            affected_nodes = [None for _ in range(self.num_layers)]
+            for layer_idx in range(self.num_layers):
+                targets = targets.unique(sorted=False)
+                affected_nodes_map[targets] = True
+                affected_nodes[layer_idx] = affected_nodes_map
+
+                if layer_idx != self.num_layers - 1:
+                    _, targets = g.out_edges(targets)
+                else:
+                    num_final_affected_nodes += targets.size(0)
+
+            num_odec = min(num_odec, targets.shape[0])
+            targets = targets[:num_odec]
+
+            for layer_idx in reversed(range(self.num_layers)):
+                affected_nodes_map.zero_()
+                affected_nodes_map[targets] = True
+
+                affected_nodes[layer_idx] = th.where(
+                    th.bitwise_and(affected_nodes[layer_idx], affected_nodes_map)
+                )[0]
+
+                if layer_idx != 0:
+                    targets, _ = g.in_edges(targets)
+                    targets = targets.unique(sorted=False)
+
+            self.collect_nodes.append(affected_nodes)
+
+        print(f"Main: Affect> Final: {num_final_affected_nodes},")
     
 
     def layerwise_inference(self, g, ddp, samplers, feats):
@@ -45,7 +82,7 @@ class Cache(Basic):
                     g, targets, samplers[layer_idx],
                     device=g.device,
                     batch_size=8192,
-                    shuffle=False,
+                    shuffle=True,
                     drop_last=False,
                     num_workers=0,
                     use_ddp=True,
