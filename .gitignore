@@ -54,6 +54,7 @@ logs/
 /results/
 
 # Keep unpublished research records out of the release branch.
+/paper/
 /docs/
 /experiments/
 /AGENTS.md

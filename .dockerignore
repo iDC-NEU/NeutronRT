@@ -54,6 +54,7 @@ Makefile
 experiments/results
 
 # Unpublished documentation and experiment records are not release inputs.
+paper
 docs
 experiments
 AGENTS.md
