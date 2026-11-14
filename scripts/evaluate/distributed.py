@@ -684,6 +684,7 @@ def trial(args, placement, base_graph, base_features, name, method, repetition):
 			"identity": identity,
 			"input_identity": input_identity,
 			"trace_digest": digest.hexdigest(),
+			"workload_counts": recording.counts,
 			"trace_preparation": {"seconds": trace_preparation_seconds, "request_bytes": trace_bytes},
 			"query_latency": latency_summary(queries),
 			"model": name,

@@ -71,6 +71,10 @@ python -m scripts.evaluate.profile --data /path/to/arxiv/raw \
   --output /tmp/profile-plan --dry-run
 ```
 
+Distributed trial reports include `workload_counts` for warmup, measured and total
+requests, with per-request sizes. Edge counts refer to requested directed pairs;
+deleting a pair removes all matching parallel edges, and an absent pair is a no-op.
+
 ## Layout
 
 - `lib/`: models, graph/storage, runtime, RPC, communication and profiling.

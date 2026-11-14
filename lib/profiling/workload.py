@@ -30,6 +30,24 @@ class RecordedWorkload:
 	rtol: float
 
 	@property
+	def counts(self) -> dict:
+		"""Count requested ID rows and directed edge pairs, including repetitions.
+
+		Query counts cover only recorded measured queries, not independent oracle
+		checks. Control RPCs and retries are not extra graph mutations.
+		"""
+		measured = tuple(request for request, _ in self.steps)
+		queries = tuple(query for _, query in self.steps)
+		return {
+			"warmup": _request_counts(self.warmup, ()),
+			"measured": _request_counts(measured, queries),
+			"total": _request_counts(self.warmup + measured, queries),
+			"scope": "Requested rows/pairs, not unique edges or actual removed records. Deletion removes all matching "
+			"parallel edges and absent pairs are no-ops; net edge count is not inferred. "
+			"Queries exclude independent oracle checks and unrecorded warmup queries.",
+		}
+
+	@property
 	def digest(self) -> str:
 		value = hashlib.sha256()
 		for request in self.warmup:
@@ -105,3 +123,44 @@ class RecordedWorkload:
 		if result.digest != payload["trace_digest"]:
 			raise ValueError("Recorded workload digest does not match its requests")
 		return result
+
+
+def _request_counts(requests: tuple[wire.Update, ...], queries: tuple[wire.Tensor, ...]) -> dict:
+	kinds = {wire.Update.FEATURES: "features", wire.Update.INSERT: "insert", wire.Update.DELETE: "delete"}
+	sizes: dict[str, list[int]] = {name: [] for name in kinds.values()}
+	for request in requests:
+		if request.kind not in kinds:
+			raise ValueError("Unknown recorded update kind")
+		first = _from_wire(request.first, MAX_TRACE_BYTES)
+		if first.dtype != torch.int64 or first.ndim != 1:
+			raise ValueError("Recorded update IDs must be an int64 vector")
+		shape = tuple(request.second.shape)
+		if request.kind == wire.Update.FEATURES:
+			valid = request.second.dtype == wire.Tensor.FLOAT32 and len(shape) == 2 and shape[0] == first.numel()
+		else:
+			valid = request.second.dtype == wire.Tensor.INT64 and shape == (first.numel(),)
+		if not valid:
+			raise ValueError("Recorded update payload rows do not match their IDs")
+		sizes[kinds[request.kind]].append(first.numel())
+	query_rows = []
+	for query in queries:
+		nodes = _from_wire(query, MAX_TRACE_BYTES)
+		if nodes.dtype != torch.int64 or nodes.ndim != 1:
+			raise ValueError("Recorded query IDs must be an int64 vector")
+		query_rows.append(nodes.numel())
+	features, inserted, deleted = (sum(sizes[kind]) for kind in ("features", "insert", "delete"))
+	return {
+		"update_requests": len(requests),
+		"requests_by_kind": {
+			kind: {"requests": len(values), "changes": sum(values), "changes_per_request": values}
+			for kind, values in sizes.items()
+		},
+		"feature_rows": features,
+		"insert_pairs": inserted,
+		"delete_pairs": deleted,
+		"edge_pair_operations": inserted + deleted,
+		"net_edge_pair_operations": inserted - deleted,
+		"input_changes": features + inserted + deleted,
+		"query_requests": sum(size > 0 for size in query_rows),
+		"query_rows": sum(query_rows),
+	}
