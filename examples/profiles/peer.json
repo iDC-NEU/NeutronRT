@@ -1,0 +1,9 @@
+[
+  {"name": "one-worker", "devices": ["cuda:0"], "batch_size": 1024, "switches": {"coalescing": true, "pipeline": true}},
+  {"name": "two-workers-proxy", "devices": ["cuda:0", "cuda:1"], "batch_size": 1024, "switches": {"coalescing": true, "pipeline": true}, "reference": "one-worker"},
+  {"name": "two-workers-direct", "devices": ["cuda:0", "cuda:1"], "batch_size": 1024, "switches": {"coalescing": true, "pipeline": true, "peer_fetch": true}, "reference": "two-workers-proxy"},
+  {"name": "two-workers-gather", "devices": ["cuda:0", "cuda:1"], "batch_size": 1024, "switches": {"coalescing": true, "pipeline": true, "peer_fetch": true, "gather_inputs": true}, "reference": "two-workers-direct"},
+  {"name": "two-workers-proxy-gather", "devices": ["cuda:0", "cuda:1"], "batch_size": 1024, "switches": {"coalescing": true, "pipeline": true, "gather_inputs": true}, "reference": "two-workers-proxy"},
+  {"name": "two-workers-query", "devices": ["cuda:0", "cuda:1"], "batch_size": 1024, "interface": "async", "query_every": 2, "switches": {"coalescing": true, "pipeline": true, "peer_fetch": true, "preemption": true}},
+  {"name": "two-workers-query-gather", "devices": ["cuda:0", "cuda:1"], "batch_size": 1024, "interface": "async", "query_every": 2, "switches": {"coalescing": true, "pipeline": true, "peer_fetch": true, "preemption": true, "gather_inputs": true}, "reference": "two-workers-query"}
+]

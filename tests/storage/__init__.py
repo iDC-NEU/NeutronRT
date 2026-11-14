@@ -1,0 +1,1 @@
+"""CPU topology storage checks."""

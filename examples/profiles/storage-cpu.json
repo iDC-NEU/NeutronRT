@@ -1,0 +1,114 @@
+[
+  {
+    "name": "master-one-worker",
+    "devices": [
+      "cpu"
+    ],
+    "interface": "async",
+    "batch_size": 2048,
+    "storage_partitions": 1,
+    "switches": {
+      "coalescing": true,
+      "pipeline": true,
+      "peer_fetch": true,
+      "gather_inputs": true,
+      "preemption": true
+    }
+  },
+  {
+    "name": "one-storage-one-worker",
+    "devices": [
+      "cpu"
+    ],
+    "interface": "async",
+    "batch_size": 2048,
+    "storage_partitions": 1,
+    "switches": {
+      "coalescing": true,
+      "pipeline": true,
+      "peer_fetch": true,
+      "gather_inputs": true,
+      "preemption": true,
+      "distributed_storage": true
+    },
+    "reference": "master-one-worker"
+  },
+  {
+    "name": "three-storage-one-worker",
+    "devices": [
+      "cpu"
+    ],
+    "interface": "async",
+    "batch_size": 2048,
+    "storage_partitions": 3,
+    "switches": {
+      "coalescing": true,
+      "pipeline": true,
+      "peer_fetch": true,
+      "gather_inputs": true,
+      "preemption": true,
+      "distributed_storage": true
+    },
+    "reference": "one-storage-one-worker"
+  },
+  {
+    "name": "three-storage-two-workers",
+    "devices": [
+      "cpu",
+      "cpu"
+    ],
+    "interface": "async",
+    "batch_size": 2048,
+    "storage_partitions": 3,
+    "switches": {
+      "coalescing": true,
+      "pipeline": true,
+      "peer_fetch": true,
+      "gather_inputs": true,
+      "preemption": true,
+      "distributed_storage": true
+    },
+    "reference": "three-storage-one-worker"
+  },
+  {
+    "name": "three-storage-concurrent",
+    "devices": [
+      "cpu",
+      "cpu"
+    ],
+    "interface": "async",
+    "batch_size": 2048,
+    "storage_partitions": 3,
+    "switches": {
+      "coalescing": true,
+      "pipeline": true,
+      "peer_fetch": true,
+      "gather_inputs": true,
+      "preemption": true,
+      "distributed_storage": true,
+      "concurrent_compute": true
+    },
+    "reference": "three-storage-two-workers"
+  },
+  {
+    "name": "three-storage-bounded",
+    "devices": [
+      "cpu",
+      "cpu"
+    ],
+    "interface": "async",
+    "batch_size": 2048,
+    "storage_partitions": 3,
+    "switches": {
+      "coalescing": true,
+      "pipeline": true,
+      "peer_fetch": true,
+      "gather_inputs": true,
+      "preemption": true,
+      "distributed_storage": true,
+      "concurrent_compute": true,
+      "bounded_staleness": true
+    },
+    "reference": "three-storage-concurrent"
+  }
+]

@@ -1,0 +1,34 @@
+[
+  {
+    "name": "embedding-only",
+    "devices": ["cpu", "cpu"],
+    "interface": "async",
+    "batch_size": 2048,
+    "storage_partitions": 3,
+    "switches": {
+      "coalescing": true,
+      "pipeline": true,
+      "peer_fetch": true,
+      "gather_inputs": true,
+      "preemption": true,
+      "distributed_storage": true
+    }
+  },
+  {
+    "name": "retained-sums",
+    "devices": ["cpu", "cpu"],
+    "interface": "async",
+    "batch_size": 2048,
+    "storage_partitions": 3,
+    "switches": {
+      "coalescing": true,
+      "pipeline": true,
+      "peer_fetch": true,
+      "gather_inputs": true,
+      "preemption": true,
+      "distributed_storage": true,
+      "retain_aggregates": true
+    },
+    "reference": "embedding-only"
+  }
+]

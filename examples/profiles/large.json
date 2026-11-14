@@ -1,0 +1,7 @@
+[
+  {"name": "serial-packed", "devices": ["cuda:0"], "switches": {"coalescing": true}},
+  {"name": "pipeline-packed", "devices": ["cuda:0"], "switches": {"coalescing": true, "pipeline": true}, "reference": "serial-packed"},
+  {"name": "native-pipeline", "devices": ["cuda:0"], "native_threads": 4, "switches": {"coalescing": true, "pipeline": true, "native_analysis": true}, "reference": "pipeline-packed"},
+  {"name": "async-pipeline", "devices": ["cuda:0"], "interface": "async", "switches": {"coalescing": true, "pipeline": true}},
+  {"name": "async-stale", "devices": ["cuda:0"], "interface": "async", "max_stale_versions": 2, "switches": {"coalescing": true, "pipeline": true, "bounded_staleness": true}, "reference": "async-pipeline"}
+]

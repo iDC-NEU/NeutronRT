@@ -1,0 +1,68 @@
+[
+  {
+    "name": "embedding-only",
+    "devices": [
+      "cpu",
+      "cpu"
+    ],
+    "interface": "async",
+    "batch_size": 2048,
+    "storage_partitions": 3,
+    "query_every": 8,
+    "switches": {
+      "coalescing": true,
+      "pipeline": true,
+      "peer_fetch": true,
+      "gather_inputs": true,
+      "preemption": true,
+      "distributed_storage": true
+    }
+  },
+  {
+    "name": "chunk-refresh-32",
+    "devices": [
+      "cpu",
+      "cpu"
+    ],
+    "interface": "async",
+    "batch_size": 2048,
+    "storage_partitions": 3,
+    "query_every": 8,
+    "switches": {
+      "coalescing": true,
+      "pipeline": true,
+      "peer_fetch": true,
+      "gather_inputs": true,
+      "preemption": true,
+      "distributed_storage": true,
+      "retain_aggregates": true,
+      "incremental_aggregates": true
+    },
+    "reference": "embedding-only",
+    "delta_max_steps": 32
+  },
+  {
+    "name": "row-refresh-32",
+    "devices": [
+      "cpu",
+      "cpu"
+    ],
+    "interface": "async",
+    "batch_size": 2048,
+    "storage_partitions": 3,
+    "query_every": 8,
+    "switches": {
+      "coalescing": true,
+      "pipeline": true,
+      "peer_fetch": true,
+      "gather_inputs": true,
+      "preemption": true,
+      "distributed_storage": true,
+      "retain_aggregates": true,
+      "incremental_aggregates": true,
+      "row_refresh": true
+    },
+    "reference": "chunk-refresh-32",
+    "delta_max_steps": 32
+  }
+]

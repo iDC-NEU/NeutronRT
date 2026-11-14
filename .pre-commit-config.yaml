@@ -1,0 +1,19 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.5.0
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy (project environment)
+        entry: python -m mypy
+        language: system
+        types_or: [python, pyi]
+        # Check protobuf interfaces through their generated stubs. Explicitly
+        # passing both module.py and module.pyi makes mypy reject duplicates.
+        exclude: '(^|/)[^/]+_pb2\.py$'
+        require_serial: true
+        args: [--ignore-missing-imports, --explicit-package-bases]

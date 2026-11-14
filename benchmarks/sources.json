@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "icde": {
+    "branch": "origin/vldb",
+    "revision": "e6e38887cf94005453d049901010b1d2cc0ce6f7",
+    "paper": "https://arxiv.org/abs/2603.20622",
+    "entrypoint": "main.py"
+  },
+  "references": [
+    {
+      "id": "icde-full",
+      "source": "icde",
+      "implementation": "lib/methods/smp.py:Sample",
+      "fanout": -1,
+      "description": "Full-neighbor affected-output recomputation in the original implementation"
+    },
+    {
+      "id": "icde-ns",
+      "source": "icde",
+      "implementation": "lib/methods/smp.py:Sample",
+      "fanout_parameter": "Positive N at every layer; main comparison N=5",
+      "description": "Original DGL neighbor-sampling baseline"
+    },
+    {
+      "id": "icde-uer",
+      "source": "icde",
+      "implementation": "lib/methods/cache.py:Cache",
+      "description": "Original intermediate-embedding reuse baseline"
+    },
+    {
+      "id": "icde-inc",
+      "source": "icde",
+      "implementation": "lib/methods/inc.py:Incremental",
+      "description": "Frozen incremental path using the default standard mean GraphSAGE model configuration"
+    },
+    {
+      "id": "inkstream",
+      "repository": "https://github.com/WuDan0399/InkStream",
+      "revision": "5d3597dc5842bcdf125680b4b012f53ac28b8f86",
+      "branch": "release",
+      "paper": "https://arxiv.org/abs/2309.11071",
+      "runtime": "Authors modified PyG environment"
+    },
+    {
+      "id": "ripple",
+      "repository": "https://github.com/dream-lab/ripple",
+      "revision": "002016df9518f451354dded9096ffb7c52e3ed60",
+      "paper": "https://arxiv.org/abs/2601.12347",
+      "runtime": "Authors NumPy CPU implementation; DGL reference workloads",
+      "reference_implementation": "src/workloads/<workload>/single/rc.py",
+      "incremental_implementation": "src/workloads/<workload>/single/in.py"
+    }
+  ]
+}

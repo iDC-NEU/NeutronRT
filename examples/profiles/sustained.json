@@ -1,0 +1,8 @@
+[
+  {"name": "serial-exact", "devices": ["cuda:0", "cuda:1"], "interface": "async", "batch_size": 8192, "switches": {"coalescing": true, "pipeline": true, "peer_fetch": true, "gather_inputs": true, "preemption": true}},
+  {"name": "concurrent-exact", "devices": ["cuda:0", "cuda:1"], "interface": "async", "batch_size": 8192, "switches": {"coalescing": true, "pipeline": true, "peer_fetch": true, "gather_inputs": true, "preemption": true, "concurrent_compute": true}, "reference": "serial-exact"},
+  {"name": "serial-bounded", "devices": ["cuda:0", "cuda:1"], "interface": "async", "batch_size": 8192, "max_stale_versions": 2, "switches": {"coalescing": true, "pipeline": true, "peer_fetch": true, "gather_inputs": true, "preemption": true, "bounded_staleness": true}, "reference": "serial-exact"},
+  {"name": "concurrent-bounded", "devices": ["cuda:0", "cuda:1"], "interface": "async", "batch_size": 8192, "max_stale_versions": 2, "switches": {"coalescing": true, "pipeline": true, "peer_fetch": true, "gather_inputs": true, "preemption": true, "bounded_staleness": true, "concurrent_compute": true}, "reference": "serial-bounded"},
+  {"name": "serial-queries", "devices": ["cuda:0", "cuda:1"], "interface": "async", "batch_size": 8192, "query_every": 2, "switches": {"coalescing": true, "pipeline": true, "peer_fetch": true, "gather_inputs": true, "preemption": true}},
+  {"name": "concurrent-queries", "devices": ["cuda:0", "cuda:1"], "interface": "async", "batch_size": 8192, "query_every": 2, "switches": {"coalescing": true, "pipeline": true, "peer_fetch": true, "gather_inputs": true, "preemption": true, "concurrent_compute": true}, "reference": "serial-queries"}
+]

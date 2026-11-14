@@ -1,0 +1,67 @@
+[
+  {
+    "name": "embedding-only",
+    "devices": [
+      "cpu",
+      "cpu"
+    ],
+    "interface": "sync",
+    "batch_size": 2048,
+    "storage_partitions": 3,
+    "query_every": 1,
+    "switches": {
+      "coalescing": true,
+      "pipeline": true,
+      "peer_fetch": true,
+      "gather_inputs": true,
+      "preemption": true,
+      "distributed_storage": true
+    }
+  },
+  {
+    "name": "sparse-refresh-2",
+    "devices": [
+      "cpu",
+      "cpu"
+    ],
+    "interface": "sync",
+    "batch_size": 2048,
+    "storage_partitions": 3,
+    "query_every": 1,
+    "switches": {
+      "coalescing": true,
+      "pipeline": true,
+      "peer_fetch": true,
+      "gather_inputs": true,
+      "preemption": true,
+      "distributed_storage": true,
+      "retain_aggregates": true,
+      "incremental_aggregates": true
+    },
+    "reference": "embedding-only",
+    "delta_max_steps": 2
+  },
+  {
+    "name": "sparse-refresh-32",
+    "devices": [
+      "cpu",
+      "cpu"
+    ],
+    "interface": "sync",
+    "batch_size": 2048,
+    "storage_partitions": 3,
+    "query_every": 1,
+    "switches": {
+      "coalescing": true,
+      "pipeline": true,
+      "peer_fetch": true,
+      "gather_inputs": true,
+      "preemption": true,
+      "distributed_storage": true,
+      "retain_aggregates": true,
+      "incremental_aggregates": true
+    },
+    "reference": "embedding-only",
+    "delta_max_steps": 32
+  }
+]

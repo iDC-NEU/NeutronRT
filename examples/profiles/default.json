@@ -1,0 +1,13 @@
+[
+  {"name": "serial-typed", "devices": ["cuda:0"], "switches": {}},
+  {"name": "serial-packed", "devices": ["cuda:0"], "switches": {"coalescing": true}, "reference": "serial-typed"},
+  {"name": "pipeline-packed", "devices": ["cuda:0"], "switches": {"coalescing": true, "pipeline": true}, "reference": "serial-packed"},
+  {"name": "async-serial", "devices": ["cuda:0"], "interface": "async", "switches": {"coalescing": true}},
+  {"name": "async-pipeline", "devices": ["cuda:0"], "interface": "async", "switches": {"coalescing": true, "pipeline": true}, "reference": "async-serial"},
+  {"name": "small-chunks", "devices": ["cuda:0"], "batch_size": 1024, "switches": {"coalescing": true, "pipeline": true}, "reference": "pipeline-packed"},
+  {"name": "native-one-thread", "devices": ["cuda:0"], "native_threads": 1, "switches": {"coalescing": true, "pipeline": true, "native_analysis": true}, "reference": "pipeline-packed"},
+  {"name": "native-four-threads", "devices": ["cuda:0"], "native_threads": 4, "switches": {"coalescing": true, "pipeline": true, "native_analysis": true}, "reference": "native-one-thread"},
+  {"name": "async-stale-k2", "devices": ["cuda:0"], "interface": "async", "max_stale_versions": 2, "switches": {"coalescing": true, "pipeline": true, "bounded_staleness": true}, "reference": "async-pipeline"},
+  {"name": "queries-strict", "devices": ["cuda:0"], "interface": "async", "query_every": 2, "switches": {"coalescing": true, "pipeline": true, "preemption": true}},
+  {"name": "queries-stale-k2", "devices": ["cuda:0"], "interface": "async", "query_every": 2, "query_staleness": 2, "max_stale_versions": 2, "switches": {"coalescing": true, "pipeline": true, "preemption": true, "bounded_staleness": true}, "reference": "queries-strict"}
+]

@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check lib/ benchmarks/ scripts/ tests/
+      - run: ruff format --check lib/ benchmarks/ scripts/ tests/
+
+  test:
+    runs-on: ubuntu-latest
+    env:
+      CUDA_VISIBLE_DEVICES: ""
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install CPU-only PyTorch and matching DGL
+        run: |
+          pip install torch==2.4.0 --index-url https://download.pytorch.org/whl/cpu
+          pip install dgl==2.4.0 -f https://data.dgl.ai/wheels/torch-2.4/repo.html
+      - name: Install runtime and test dependencies
+        run: pip install -e '.[dev]' grpcio-tools==1.75.1
+      - name: Verify generated RPC stubs
+        run: |
+          python -m scripts.generate_inference_proto
+          git diff --exit-code -- lib/rpc/inference_pb2.py lib/rpc/inference_pb2.pyi lib/rpc/inference_pb2_grpc.py
+      - name: Run tests
+        run: python -m pytest tests/ -v

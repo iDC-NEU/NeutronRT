@@ -1,0 +1,4 @@
+[
+  {"name": "strict-test-queries", "devices": ["cuda:0"], "interface": "async", "query_every": 2, "switches": {"coalescing": true, "pipeline": true, "preemption": true}},
+  {"name": "bounded-test-queries", "devices": ["cuda:0"], "interface": "async", "query_every": 2, "query_staleness": 2, "max_stale_versions": 2, "switches": {"coalescing": true, "pipeline": true, "preemption": true, "bounded_staleness": true}, "reference": "strict-test-queries"}
+]

@@ -1,0 +1,95 @@
+syntax = "proto3";
+
+package neutronrt.owned;
+
+// Sync and Async admit the same update. Sync waits for ready publication;
+// storage writeback may finish later. A caller timeout never cancels admission.
+service OwnedInference {
+  rpc Sync(Update) returns (Completion);
+  rpc Async(Update) returns (Ticket);
+  rpc Wait(WaitRequest) returns (Completion);
+  rpc Release(Ticket) returns (Empty);
+  rpc Query(QueryRequest) returns (QueryResponse);
+  rpc Info(Empty) returns (RuntimeInfo);
+}
+
+message Empty {}
+
+message Tensor {
+  enum DType {
+    UNSPECIFIED = 0;
+    INT64 = 1;
+    FLOAT32 = 2;
+    BOOL = 3;
+  }
+  DType dtype = 1;
+  repeated uint64 shape = 2;
+  // Contiguous C order, little endian, IEEE float32. No Python element lists.
+  bytes data = 3;
+}
+
+message Update {
+  enum Kind {
+    UNSPECIFIED = 0;
+    FEATURES = 1;
+    INSERT = 2;
+    DELETE = 3;
+  }
+  Kind kind = 1;
+  Tensor first = 2; // node IDs, or source IDs
+  Tensor second = 3; // feature rows, or target IDs
+  // Reuse a request ID only for retries of identical payloads in this session.
+  string request_id = 4;
+  string session = 5; // optional on first submission
+  Tensor attributes = 6; // optional INSERT edge rows following graph.edata["nrt"]
+}
+
+message Ticket {
+  string session = 1;
+  uint64 number = 2;
+  string request_id = 3;
+}
+
+message WaitRequest {
+  Ticket ticket = 1;
+  bool poll = 2;
+}
+
+message Completion {
+  Ticket ticket = 1;
+  bool ready = 2;
+  uint64 version = 3;
+  repeated uint64 affected = 4;
+  uint64 input_changes = 5;
+  uint64 model_tasks = 6;
+  uint64 input_version = 7; // publication version may cover several staged inputs
+}
+
+message QueryRequest {
+  Tensor nodes = 1;
+  optional uint32 layer = 2; // absent: final output; zero: authoritative features
+  uint64 max_staleness = 3; // zero: strict; shared graph-update version bound
+}
+
+message QueryResponse {
+  Tensor values = 1;
+  uint64 version = 2;
+  uint64 min_fresh_version = 3; // minimum per-row validity certificate, not a snapshot
+  uint64 max_age = 4;
+}
+
+message RuntimeInfo {
+  string session = 1;
+  uint64 nodes = 2;
+  repeated uint64 widths = 3;
+  uint64 graph_version = 4;
+  uint64 completed_updates = 5;
+  uint64 completed_input_changes = 6;
+  uint64 pending_updates = 7;
+  uint64 failed_updates = 8;
+  uint64 recovery_rows = 9;
+  double recovery_seconds = 10;
+  double uptime_seconds = 11;
+  optional uint64 incomplete_version = 12;
+  uint64 max_staleness = 13;
+}

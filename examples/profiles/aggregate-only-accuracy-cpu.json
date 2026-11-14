@@ -1,0 +1,55 @@
+[
+  {
+    "name": "embedding-only",
+    "devices": ["cpu", "cpu"],
+    "interface": "sync",
+    "batch_size": 2048,
+    "storage_partitions": 3,
+    "query_every": 1,
+    "switches": {
+      "coalescing": true,
+      "pipeline": true,
+      "peer_fetch": true,
+      "gather_inputs": true,
+      "preemption": true,
+      "distributed_storage": true
+    }
+  },
+  {
+    "name": "retained-sums",
+    "devices": ["cpu", "cpu"],
+    "interface": "sync",
+    "batch_size": 2048,
+    "storage_partitions": 3,
+    "query_every": 1,
+    "switches": {
+      "coalescing": true,
+      "pipeline": true,
+      "peer_fetch": true,
+      "gather_inputs": true,
+      "preemption": true,
+      "distributed_storage": true,
+      "retain_aggregates": true
+    },
+    "reference": "embedding-only"
+  },
+  {
+    "name": "aggregate-only",
+    "devices": ["cpu", "cpu"],
+    "interface": "sync",
+    "batch_size": 2048,
+    "storage_partitions": 3,
+    "query_every": 1,
+    "switches": {
+      "coalescing": true,
+      "pipeline": true,
+      "peer_fetch": true,
+      "gather_inputs": true,
+      "preemption": true,
+      "distributed_storage": true,
+      "retain_aggregates": true,
+      "aggregate_only": true
+    },
+    "reference": "retained-sums"
+  }
+]
