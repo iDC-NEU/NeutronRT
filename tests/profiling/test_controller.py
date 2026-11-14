@@ -147,11 +147,42 @@ def test_idle_publication_is_fenced_before_the_caller_stops_its_measurement(monk
 			admission.submit(UpdateKind.FEATURES, torch.tensor([1]), runtime.service.features[[1]] + 1).result(10)
 			report = profiler.stop()
 			assert report["valid"] and report["coordinator"]["open_spans"] == 0
+			assert report["publication"]["service_drained"]
 			assert report["engine"]["updates"] == report["engine"]["merged_batches"] == 1
 			assert report["engine"]["completion_window_seconds"] >= 0.01
 			assert report["engine"]["staging_seconds"] > 0
 			assert report["coordinator"]["timings"]["root.publish_merged_update"]["count"] == 1
 	finally:
 		admission.close()
+		deferred.close()
+		plane.close()
+
+
+def test_undrained_window_is_invalid_and_stop_does_not_execute_unmeasured_work(monkeypatch):
+	runtime, plane, _ = _runtime(monkeypatch)
+	deferred = DeferredUpdates(runtime.service, max_versions=8, idle_seconds=60)
+	try:
+		with RuntimeProfiler(runtime) as profiler:
+			profiler.start()
+			future = deferred.submit("features", torch.tensor([1]), runtime.service.features[[1]] + 1)
+			report = profiler.stop()
+			assert not report["valid"] and not future.done()
+			assert report["publication"] == {
+				"pending_deferred_updates": 1,
+				"update_incomplete": False,
+				"service_drained": False,
+			}
+			assert report["engine"]["updates"] == 0
+			with pytest.raises(RuntimeError, match="pending update publication"):
+				profiler.start()
+			deferred.flush()
+			assert future.result().version == 1
+			profiler.start()
+			deferred.submit("features", torch.tensor([1]), runtime.service.features[[1]] + 1)
+			deferred.flush()
+			report = profiler.stop()
+			assert report["valid"] and report["publication"]["service_drained"]
+			assert report["engine"]["updates"] == 1
+	finally:
 		deferred.close()
 		plane.close()

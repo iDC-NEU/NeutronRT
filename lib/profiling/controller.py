@@ -149,6 +149,8 @@ class RuntimeProfiler:
 		with service._fence:
 			if self.recorder.active:
 				raise RuntimeError("Runtime measurement window is already active")
+			if not self._publication_state()["service_drained"]:
+				raise RuntimeError("Finish pending update publication before starting a measurement window")
 			if trace and self.runtime.profile_dir is None:
 				raise ValueError("Trace capture requires a profile directory")
 			self._first_update = self._last_update = 0
@@ -164,11 +166,23 @@ class RuntimeProfiler:
 				path = Path(self.runtime.profile_dir) / "coordinator.phases.json"
 			self.recorder.start(path)
 
+	def _publication_state(self) -> dict:
+		"""The caller holds the service fence; queued RPC admission is external."""
+		service = self.runtime.service
+		pending = service.deferred.pending if service.deferred is not None else 0
+		incomplete = service._pending_update is not None
+		return {
+			"pending_deferred_updates": pending,
+			"update_incomplete": incomplete,
+			"service_drained": pending == 0 and not incomplete,
+		}
+
 	def stop(self) -> dict:
 		service = self.runtime.service
 		with service._fence:
 			if self._rss is None:
 				raise RuntimeError("No active runtime measurement window")
+			publication = self._publication_state()
 			root = self.recorder.stop()
 			root["rss"] = self._rss.stop()
 			self._rss = None
@@ -185,7 +199,8 @@ class RuntimeProfiler:
 			all_reports = [root, *workers]
 			sent, received = payload_total(all_reports, "send"), payload_total(all_reports, "recv")
 			valid = (
-				not reset
+				publication["service_drained"]
+				and not reset
 				and sent == received
 				and all(report["open_spans"] == 0 and report["series_dropped"] == 0 for report in all_reports)
 				and all(timing["failures"] == 0 for report in all_reports for timing in report["timings"].values())
@@ -200,6 +215,7 @@ class RuntimeProfiler:
 					"seed": service.planner.policy.seed,
 				},
 				"valid": valid,
+				"publication": publication,
 				"worker_world_reset": reset,
 				"traffic_balanced": sent == received,
 				"trace_pass": any(report["trace_path"] for report in all_reports),
