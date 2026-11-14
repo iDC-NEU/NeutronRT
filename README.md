@@ -71,6 +71,11 @@ python -m scripts.evaluate.profile --data /path/to/arxiv/raw \
   --output /tmp/profile-plan --dry-run
 ```
 
+`examples/profiles/deferred-cpu.json` provides exact execution and version windows
+of 0, 1, 2, 4 and 8. A version window does not impose a numerical error budget.
+Wait for every admitted update, including final deferred publication, before
+stopping a measurement; unfinished service publication invalidates the profile.
+
 Distributed trial reports include `workload_counts` for warmup, measured and total
 requests, with per-request sizes. Edge counts refer to requested directed pairs;
 deleting a pair removes all matching parallel edges, and an absent pair is a no-op.

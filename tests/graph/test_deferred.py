@@ -182,3 +182,57 @@ def test_sync_admission_flushes_immediately_and_analysis_failure_remains_resumab
 		admission.close()
 		deferred.close()
 		plane.close()
+
+
+@pytest.mark.parametrize("name", ["sage", "gat", "gcn"])
+@pytest.mark.parametrize("budget", [0, 1, 2, 4, 8])
+def test_output_age_is_a_shared_version_budget_and_flush_restores_all_layers(name, budget):
+	service, plane, storage, deferred = _initialized(name, max_versions=budget)
+	nodes = torch.arange(6)
+	with service.query(nodes, storage.owner) as initial:
+		original = initial.clone()
+	base = service.features[[1]].clone()
+	tickets = []
+	try:
+		for version in range(1, budget + 2):
+			tickets.append(deferred.submit("features", torch.tensor([1]), base + version))
+			if version <= budget:
+				assert all(not ticket.done() for ticket in tickets)
+				assert service.catalog.ages(2, torch.tensor([3]), version).item() == version
+				with service.query(nodes, storage.owner, max_staleness=budget) as stale:
+					torch.testing.assert_close(stale, original)
+		assert [ticket.result().input_version for ticket in tickets] == list(range(1, budget + 2))
+		assert all(ticket.result().version == budget + 1 for ticket in tickets)
+		assert not deferred.pending and service.counters.updates == budget + 1
+		assert not service.catalog.ages(2, nodes, budget + 1).any()
+		with service.query(nodes, storage.owner) as actual:
+			torch.testing.assert_close(actual, _current_reference(service), rtol=2e-5, atol=2e-5)
+	finally:
+		deferred.close()
+		plane.close()
+
+
+@pytest.mark.parametrize("name", ["sage", "gat", "gcn"])
+def test_overlapping_updates_reinvalidate_a_downstream_row_computed_before_final_flush(name):
+	service, plane, storage, deferred = _initialized(name)
+	downstream = torch.tensor([3])
+	try:
+		first = deferred.submit("features", torch.tensor([1]), service.features[[1]] + 3)
+		with service.query(downstream, storage.owner) as actual:
+			torch.testing.assert_close(actual, _current_reference(service)[downstream], rtol=2e-5, atol=2e-5)
+		assert service.catalog.available(2, downstream, 1).all() and not first.done()
+		tickets = [
+			first,
+			deferred.submit("insert", torch.tensor([2]), downstream),
+			deferred.submit("features", torch.tensor([2]), service.features[[2]] + 5),
+			deferred.submit("delete", torch.tensor([1]), torch.tensor([2])),
+		]
+		assert not service.catalog.available(2, downstream, 4).any()
+		deferred.flush()
+		assert all(ticket.result().version == 4 for ticket in tickets)
+		assert service.graph.num_edges() == 6
+		with service.query(torch.arange(6), storage.owner) as actual:
+			torch.testing.assert_close(actual, _current_reference(service), rtol=2e-5, atol=2e-5)
+	finally:
+		deferred.close()
+		plane.close()

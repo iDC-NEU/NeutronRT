@@ -1,0 +1,112 @@
+[
+  {
+    "name": "exact-async",
+    "devices": [
+      "cpu"
+    ],
+    "interface": "async",
+    "max_inflight": 16,
+    "query_every": 1,
+    "idle_flush_seconds": 0.05,
+    "switches": {
+      "coalescing": true,
+      "pipeline": true,
+      "operator_incremental": true
+    }
+  },
+  {
+    "name": "deferred-w0",
+    "devices": [
+      "cpu"
+    ],
+    "interface": "async",
+    "max_inflight": 16,
+    "query_every": 1,
+    "query_staleness": 0,
+    "max_stale_versions": 0,
+    "idle_flush_seconds": 0.05,
+    "switches": {
+      "coalescing": true,
+      "pipeline": true,
+      "operator_incremental": true,
+      "bounded_staleness": true
+    },
+    "reference": "exact-async"
+  },
+  {
+    "name": "deferred-w1",
+    "devices": [
+      "cpu"
+    ],
+    "interface": "async",
+    "max_inflight": 16,
+    "query_every": 1,
+    "query_staleness": 1,
+    "max_stale_versions": 1,
+    "idle_flush_seconds": 0.05,
+    "switches": {
+      "coalescing": true,
+      "pipeline": true,
+      "operator_incremental": true,
+      "bounded_staleness": true
+    },
+    "reference": "exact-async"
+  },
+  {
+    "name": "deferred-w2",
+    "devices": [
+      "cpu"
+    ],
+    "interface": "async",
+    "max_inflight": 16,
+    "query_every": 1,
+    "query_staleness": 2,
+    "max_stale_versions": 2,
+    "idle_flush_seconds": 0.05,
+    "switches": {
+      "coalescing": true,
+      "pipeline": true,
+      "operator_incremental": true,
+      "bounded_staleness": true
+    },
+    "reference": "exact-async"
+  },
+  {
+    "name": "deferred-w4",
+    "devices": [
+      "cpu"
+    ],
+    "interface": "async",
+    "max_inflight": 16,
+    "query_every": 1,
+    "query_staleness": 4,
+    "max_stale_versions": 4,
+    "idle_flush_seconds": 0.05,
+    "switches": {
+      "coalescing": true,
+      "pipeline": true,
+      "operator_incremental": true,
+      "bounded_staleness": true
+    },
+    "reference": "exact-async"
+  },
+  {
+    "name": "deferred-w8",
+    "devices": [
+      "cpu"
+    ],
+    "interface": "async",
+    "max_inflight": 16,
+    "query_every": 1,
+    "query_staleness": 8,
+    "max_stale_versions": 8,
+    "idle_flush_seconds": 0.05,
+    "switches": {
+      "coalescing": true,
+      "pipeline": true,
+      "operator_incremental": true,
+      "bounded_staleness": true
+    },
+    "reference": "exact-async"
+  }
+]
