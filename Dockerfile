@@ -6,7 +6,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # The base image supplies Python and the matching CUDA PyTorch build.
 RUN python -m pip install --upgrade pip setuptools wheel
-RUN python -m pip install dgl==2.4.0 -f https://data.dgl.ai/wheels/torch-2.4/cu124/repo.html
+RUN conda install --yes -c dglteam/label/th24_cu124 dgl=2.4.0.th24.cu124 \
+	&& conda clean --all --yes
 
 COPY requirements.txt /opt/neutronrt/
 RUN python -m pip install -r /opt/neutronrt/requirements.txt

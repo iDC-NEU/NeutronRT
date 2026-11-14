@@ -20,19 +20,25 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -el {0}
     env:
       CUDA_VISIBLE_DEVICES: ""
       OMP_NUM_THREADS: "1"
       MKL_NUM_THREADS: "1"
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: conda-incubator/setup-miniconda@v3
         with:
+          miniforge-version: latest
+          activate-environment: graph
+          auto-activate-base: false
           python-version: "3.12"
       - name: Install CPU-only PyTorch and matching DGL
         run: |
+          conda install --yes --channel dglteam/label/th24_cpu dgl=2.4.0.th24.cpu
           pip install torch==2.4.0 --index-url https://download.pytorch.org/whl/cpu
-          pip install dgl==2.4.0 -f https://data.dgl.ai/wheels/torch-2.4/repo.html
       - name: Install runtime and test dependencies
         run: pip install -e '.[dev]' grpcio-tools==1.75.1
       - name: Verify generated RPC stubs
