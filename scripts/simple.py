@@ -34,6 +34,7 @@ from lib.runtime.config import RuntimeFeatures
 from lib.runtime.launch import Placement, WorkerSettings, resolve_devices, run_worker
 from lib.runtime.managed import ManagedRuntime
 from lib.runtime.transport import RemoteEndpoint
+from lib.storage.capacity import GIB
 
 
 def _export_profile(profiler, path, switches):
@@ -91,6 +92,12 @@ class Options:
 	seed: int | None
 	threads: int | None
 	storage_partitions: int
+	storage_node_names: list[str] | None
+	storage_node_capacity_bytes: int
+	storage_node_reserve_bytes: int
+	storage_endpoints: list[str] | None
+	storage_authkey: str
+	network_interfaces: list[str] | None
 	native_threads: int
 	max_stale_versions: int
 	idle_flush_seconds: float
@@ -188,6 +195,25 @@ def main(
 		typer.Option("--threads", help="Worker intra-op threads; defaults to the PyTorch/environment setting"),
 	] = None,
 	storage_partitions: Annotated[int, typer.Option("--storage-partitions")] = 1,
+	storage_node_names: Annotated[
+		list[str] | None,
+		typer.Option("--storage-node", help="Storage node label; repeat once per storage partition"),
+	] = None,
+	storage_node_capacity_bytes: Annotated[
+		int, typer.Option("--storage-node-capacity-bytes", help="Physical capacity for each storage node")
+	] = 512 * GIB,
+	storage_node_reserve_bytes: Annotated[
+		int, typer.Option("--storage-node-reserve-bytes", help="Memory reserved for common server use")
+	] = 64 * GIB,
+	storage_endpoints: Annotated[
+		list[str] | None,
+		typer.Option("--storage-endpoint", help="Remote storage HOST:PORT; repeat once per storage partition"),
+	] = None,
+	storage_authkey: Annotated[str, typer.Option("--storage-authkey")] = "neutronrt",
+	network_interfaces: Annotated[
+		list[str] | None,
+		typer.Option("--network-interface", help="OS interface to sample; repeat to select several"),
+	] = None,
 	native_threads: Annotated[int, typer.Option("--native-threads")] = 4,
 	max_stale_versions: Annotated[int, typer.Option("--max-stale-versions")] = 2,
 	idle_flush_seconds: Annotated[float, typer.Option("--idle-flush-seconds")] = 0.005,
@@ -336,6 +362,13 @@ def _run(args: Options, placement: Placement):
 		)
 		< 1
 		or min(args.storage_bytes, args.retries, args.ticket_retention, args.history_bytes) < 0
+		or args.storage_node_capacity_bytes < 1
+		or args.storage_node_reserve_bytes < 0
+		or args.storage_node_reserve_bytes >= args.storage_node_capacity_bytes
+		or args.storage_node_names is not None
+		and len(args.storage_node_names) != args.storage_partitions
+		or args.storage_endpoints is not None
+		and len(args.storage_endpoints) != args.storage_partitions
 		or args.delta_anchor_bytes is not None
 		and args.delta_anchor_bytes < 0
 	):
@@ -420,6 +453,11 @@ def _run(args: Options, placement: Placement):
 				switches=switches,
 				native_threads=args.native_threads,
 				storage_partitions=args.storage_partitions,
+				storage_node_names=tuple(args.storage_node_names) if args.storage_node_names else None,
+				storage_node_capacity_bytes=args.storage_node_capacity_bytes,
+				storage_node_reserve_bytes=args.storage_node_reserve_bytes,
+				storage_endpoints=tuple(args.storage_endpoints) if args.storage_endpoints else None,
+				storage_authkey=args.storage_authkey,
 				storage_directory=str(args.topology_root) if args.topology_root else None,
 				max_stale_versions=args.max_stale_versions,
 				idle_flush_seconds=args.idle_flush_seconds,
@@ -430,7 +468,7 @@ def _run(args: Options, placement: Placement):
 		)
 		graph = runtime.service.graph
 		if switches.profiling:
-			profiler = stack.enter_context(RuntimeProfiler(runtime))
+			profiler = stack.enter_context(RuntimeProfiler(runtime, network_interfaces=args.network_interfaces))
 			profiler.start()
 			stack.callback(_export_profile, profiler, args.profile_report, switches)
 		frontend = OwnedServicer(

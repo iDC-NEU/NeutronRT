@@ -90,6 +90,17 @@ def test_staged_topology_changes_leave_runtime_graph_untouched():
 	assert oracle.num_edges() == graph.num_edges() == 2
 
 
+def test_edge_change_record_separates_requested_pairs_from_effective_delta():
+	graph = dgl.graph(([0], [1]), num_nodes=2)
+	request = wire.Update(
+		kind=wire.Update.DELETE, first=_to_wire(torch.tensor([0, 0])), second=_to_wire(torch.tensor([1, 1]))
+	)
+	record = distributed.edge_change_record(graph, request, mirror=True)
+	assert record["requested_changes"] == 2
+	assert record["effective_edge_delta"] == -1
+	assert record["effective_edge_changes"] == 1
+
+
 def test_cli_accepts_canonical_methods_and_rejects_duplicates(monkeypatch, tmp_path):
 	captured = []
 	monkeypatch.setattr(distributed, "_run", captured.append)

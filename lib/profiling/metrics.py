@@ -97,10 +97,14 @@ def measurements(trial: dict) -> dict:
 		},
 		"communication": {
 			**profile["p2p"],
+			"network": profile.get("network"),
 			"storage_selected_adjacency_bytes": sum(
 				part["shared_response_bytes"] for part in (profile.get("storage") or {}).get("partitions", {}).values()
 			),
-			"scope": "Tensor payload bytes counted once at sender; excludes protocol overhead",
+			"scope": (
+				"P2P values are application tensor payloads counted once at sender; "
+				"network values are host interface counters and may include unrelated traffic"
+			),
 		},
 		"embedding_mse": max(item["mean_squared_error"] for item in trial["correctness"]),
 		"max_absolute_error": max(item["max_error"] for item in trial["correctness"]),

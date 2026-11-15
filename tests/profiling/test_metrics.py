@@ -41,6 +41,7 @@ def test_sparse_reports_include_delta_work_and_index_maintenance():
 			"workers": [worker],
 			"coordinator": {"rss": {"peak_rss_bytes": 128}, "timings": {"root.graph_formats": {"total_seconds": 4}}},
 			"p2p": {"send_payload_bytes": 10},
+			"network": {"totals": {"bytes_sent": 100, "bytes_recv": 120}},
 			"storage": {"partitions": {"0": {"shared_response_bytes": 32}}},
 		},
 	}
@@ -51,3 +52,4 @@ def test_sparse_reports_include_delta_work_and_index_maintenance():
 	assert result["phases_seconds"]["worker_model_cuda"] == pytest.approx(0.3)
 	assert result["phases_seconds"]["graph_index_maintenance"] == 4
 	assert result["communication"]["storage_selected_adjacency_bytes"] == 32
+	assert result["communication"]["network"]["totals"]["bytes_sent"] == 100

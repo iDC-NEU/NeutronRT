@@ -48,6 +48,10 @@ def markdown_report(report: dict) -> str:
 					typical([run["profile"]["engine"].get("delta_routed_edges", 0) for run in runs], precision=0),
 					typical([run["profile"]["engine"].get("delta_refresh_rows", 0) for run in runs], precision=0),
 					typical([run["profile"]["p2p"]["send_payload_bytes"] for run in runs], scale=1 / 1024**2),
+					typical(
+						[(run["profile"].get("network") or {}).get("totals", {}).get("bytes_sent") for run in runs],
+						scale=1 / 1024**2,
+					),
 					typical([run["query_latency"]["p99_seconds"] for run in runs], scale=1000),
 					f"{max(query_errors):.3g}" if query_errors else "—",
 					f"{max(accuracy_losses):.3f}" if accuracy_losses else "—",
@@ -69,8 +73,9 @@ def markdown_report(report: dict) -> str:
 			"",
 			"| Case | Valid | Client changes/s | Engine changes/s | Model rows | "
 			"Full-neighbor edges | Delta edges | Refresh rows | "
-			"Send MiB | Query p99 ms | Max query error | Worst accuracy loss pp | Verdict | Method |",
-			"| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |",
+			"P2P send MiB | NIC sent MiB | Query p99 ms | Max query error | Worst accuracy loss pp | "
+			"Verdict | Method |",
+			"| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |",
 			*rows,
 			"",
 			(
@@ -78,7 +83,8 @@ def markdown_report(report: dict) -> str:
 				if report.get("full_test_coverage")
 				else "Accuracy uses captured selected test rows, rather than the entire official test split."
 			),
-			"Work includes on-demand recomputation. Send bytes measure P2P tensor payloads, not NIC traffic.",
+			"P2P bytes are application tensor payloads. NIC bytes are host interface counters and may include "
+			"unrelated traffic.",
 			"CPU/CUDA phases overlap. Detailed traces run separately from timings. Raw reports retain all samples.",
 			"",
 		]

@@ -24,6 +24,7 @@ def _runtime(monkeypatch):
 		comm=comm,
 		plane=SimpleNamespace(transport=transport),
 		service=service,
+		topology=SimpleNamespace(storage=SimpleNamespace(stats=lambda: {}, processes=[]), initialization={}),
 		reset_count=0,
 		profile_dir=None,
 	)

@@ -48,6 +48,7 @@ from lib.runtime.config import RuntimeFeatures
 from lib.runtime.launch import Placement, WorkerSettings, run_worker
 from lib.runtime.managed import ManagedRuntime
 from lib.runtime.transport import RemoteEndpoint
+from lib.storage.capacity import GIB
 
 NodeSelectionChoice = StrEnum(  # type: ignore[misc]  # Mypy requires literal Enum members.
 	"NodeSelectionChoice", {str(value).replace("-", "_").upper(): value for value in ["neighbors", "prefix"]}
@@ -132,6 +133,12 @@ class Options:
 	topology: str
 	topology_root: Path | None
 	storage_partitions: int
+	storage_node_names: list[str] | None
+	storage_node_capacity_bytes: int
+	storage_node_reserve_bytes: int
+	storage_endpoints: list[str] | None
+	storage_authkey: str
+	network_interfaces: list[str] | None
 	incremental_engine: str
 	initialization: str
 	initialization_batch_size: int
@@ -230,6 +237,27 @@ def main(
 		Path | None, typer.Option("--topology-root", help="Working directory for mapped adjacency files")
 	] = None,
 	storage_partitions: Annotated[int, typer.Option("--storage-partitions")] = 1,
+	storage_node_names: Annotated[
+		list[str] | None,
+		typer.Option("--storage-node", help="Storage node label; repeat once per storage partition"),
+	] = None,
+	storage_node_capacity_bytes: Annotated[
+		int, typer.Option("--storage-node-capacity-bytes", help="Physical capacity reported for each storage node")
+	] = 512 * GIB,
+	storage_node_reserve_bytes: Annotated[
+		int, typer.Option("--storage-node-reserve-bytes", help="Memory reserved for non-NeutronRT workloads")
+	] = 64 * GIB,
+	storage_endpoints: Annotated[
+		list[str] | None,
+		typer.Option("--storage-endpoint", help="Remote storage HOST:PORT; repeat once per storage partition"),
+	] = None,
+	storage_authkey: Annotated[str, typer.Option("--storage-authkey")] = "neutronrt",
+	network_interfaces: Annotated[
+		list[str] | None,
+		typer.Option(
+			"--network-interface", help="Interface to sample for OS network counters; repeat to select several"
+		),
+	] = None,
 	incremental_engine: Annotated[
 		IncrementalEngineChoice, typer.Option("--incremental-engine")
 	] = _DEFAULT_INCREMENTAL_ENGINE,
@@ -250,12 +278,24 @@ def main(
 			"workload": workload.value,
 			"backend": backend.value,
 			"topology": topology.value,
+			"storage_node_names": storage_node_names,
+			"storage_endpoints": storage_endpoints,
 			"incremental_engine": incremental_engine.value,
 			"initialization": initialization.value,
 		}
 	)
 	if args.topology == "mapped" and any(name in ("pinsage", "rgcn", "rgat", "monet") for name in args.models):
 		raise typer.BadParameter("Mapped topology does not yet store model-specific edge attributes")
+	if args.storage_node_names is not None and len(args.storage_node_names) != args.storage_partitions:
+		raise typer.BadParameter("Pass one --storage-node label per storage partition")
+	if args.storage_endpoints is not None and len(args.storage_endpoints) != args.storage_partitions:
+		raise typer.BadParameter("Pass one --storage-endpoint per storage partition")
+	if (
+		args.storage_node_capacity_bytes < 1
+		or args.storage_node_reserve_bytes < 0
+		or args.storage_node_reserve_bytes >= args.storage_node_capacity_bytes
+	):
+		raise typer.BadParameter("Storage capacity must exceed its non-NeutronRT reserve")
 	if args.incremental_engine == "aggregates" and any(name != "sage" for name in args.models):
 		raise typer.BadParameter("Projected aggregates require mean GraphSAGE; use auto for mixed models")
 	if len(set(args.methods)) != len(args.methods):
@@ -416,6 +456,23 @@ def mirror_edges(graph, request):
 		graph.remove_edges(graph.edge_ids(first, second, return_uv=True)[2].unique())
 
 
+def edge_change_record(graph, request, *, mirror: bool) -> dict:
+	"""Record requested pairs and effective graph-edge changes separately."""
+	requested = int(request.first.shape[0])
+	before = graph.num_edges()
+	if mirror:
+		mirror_edges(graph, request)
+	after = graph.num_edges()
+	return {
+		"kind": int(request.kind),
+		"requested_changes": requested,
+		"edge_count_before": before,
+		"edge_count_after": after,
+		"effective_edge_delta": after - before if request.kind != wire.Update.FEATURES else 0,
+		"effective_edge_changes": abs(after - before) if request.kind != wire.Update.FEATURES else 0,
+	}
+
+
 def execute_update(stub, request, timeout, *, duplicate=False):
 	start = perf_counter()
 	if request.kind == wire.Update.INSERT:
@@ -523,6 +580,11 @@ def trial(args, placement, base_graph, base_features, name, method, repetition):
 				storage_bytes=args.storage_bytes,
 				storage_overlay_bytes=args.storage_overlay_bytes,
 				storage_response_bytes=args.storage_response_bytes,
+				storage_node_names=tuple(args.storage_node_names) if args.storage_node_names else None,
+				storage_node_capacity_bytes=args.storage_node_capacity_bytes,
+				storage_node_reserve_bytes=args.storage_node_reserve_bytes,
+				storage_endpoints=tuple(args.storage_endpoints) if args.storage_endpoints else None,
+				storage_authkey=args.storage_authkey,
 				history_bytes=args.history_bytes,
 				delta_max_steps=args.refresh_steps,
 				delta_anchor_bytes=args.anchor_bytes,
@@ -594,15 +656,30 @@ def trial(args, placement, base_graph, base_features, name, method, repetition):
 
 		checks = [check()]
 		warmup_requests = []
+		warmup_edge_changes = []
 		for index in range(args.warmup):
 			request = make_update(
 				graph, features, spec, index, changes, generator, f"warm-{index}", workload=args.workload
 			)
 			digest.update(request.SerializeToString(deterministic=True))
 			warmup_requests.append(request)
+			before_edges = graph.num_edges()
 			execute_update(stub, request, args.timeout, duplicate=True)
 			if args.topology == "mapped":
 				mirror_edges(graph, request)
+			after_edges = graph.num_edges()
+			warmup_edge_changes.append(
+				{
+					"kind": int(request.kind),
+					"requested_changes": int(request.first.shape[0]),
+					"edge_count_before": before_edges,
+					"edge_count_after": after_edges,
+					"effective_edge_delta": after_edges - before_edges if request.kind != wire.Update.FEATURES else 0,
+					"effective_edge_changes": abs(after_edges - before_edges)
+					if request.kind != wire.Update.FEATURES
+					else 0,
+				}
+			)
 			checks.append(check())
 			logging.info("Warmup %d complete for %s", index + 1, method)
 		# Build the immutable workload and final oracle before the measured window.
@@ -610,6 +687,7 @@ def trial(args, placement, base_graph, base_features, name, method, repetition):
 		preparing = perf_counter()
 		graph = graph.clone()
 		trace, pending, trace_bytes = [], {}, 0
+		measured_edge_changes = []
 		for index in range(args.updates):
 			request = make_update(
 				graph,
@@ -627,7 +705,7 @@ def trial(args, placement, base_graph, base_features, name, method, repetition):
 			if len(encoded) > 60 * 1024**2 or trace_bytes > 256 * 1024**2:
 				raise ValueError("Workload exceeds the bounded request trace budget")
 			digest.update(encoded)
-			mirror_edges(graph, request)
+			measured_edge_changes.append(edge_change_record(graph, request, mirror=True))
 			nodes = torch.randint(graph.num_nodes(), (args.queries,), generator=generator)
 			if args.queries:
 				digest.update(nodes.numpy().tobytes())
@@ -650,7 +728,7 @@ def trial(args, placement, base_graph, base_features, name, method, repetition):
 		if recording.digest != digest.hexdigest():
 			raise AssertionError("Recorded workload differs from the measured request sequence")
 		recording.save(args.output / f"{name}-{method}-{repetition}-workload.pt")
-		profiler = stack.enter_context(RuntimeProfiler(runtime))
+		profiler = stack.enter_context(RuntimeProfiler(runtime, network_interfaces=args.network_interfaces))
 		profiler.start()
 		rpc_timings.clear()
 		updates, queries = [], []
@@ -684,7 +762,19 @@ def trial(args, placement, base_graph, base_features, name, method, repetition):
 			"identity": identity,
 			"input_identity": input_identity,
 			"trace_digest": digest.hexdigest(),
-			"workload_counts": recording.counts,
+			"workload_counts": {
+				**recording.counts,
+				"effective_edge_changes": {
+					"warmup": warmup_edge_changes,
+					"measured": measured_edge_changes,
+					"total_effective_edge_delta": sum(
+						item["effective_edge_delta"] for item in (*warmup_edge_changes, *measured_edge_changes)
+					),
+					"total_effective_edge_changes": sum(
+						item["effective_edge_changes"] for item in (*warmup_edge_changes, *measured_edge_changes)
+					),
+				},
+			},
 			"trace_preparation": {"seconds": trace_preparation_seconds, "request_bytes": trace_bytes},
 			"query_latency": latency_summary(queries),
 			"model": name,

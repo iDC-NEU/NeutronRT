@@ -6,7 +6,7 @@ from contextlib import ExitStack
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import perf_counter
-from typing import Callable, Optional, TypeVar, cast
+from typing import Any, Callable, Optional, TypeVar, cast
 
 import dgl
 import numpy as np
@@ -16,7 +16,10 @@ from dgl.heterograph import DGLBlock
 from torch import Tensor
 
 from lib.storage.base import BaseTopology
+from lib.storage.capacity import StorageNodeBudget, require_capacity
+from lib.storage.capacity import manifest as capacity_manifest
 from lib.storage.process import LocalStorage
+from lib.storage.remote import RemoteStorage
 
 Result = TypeVar("Result")
 Rows = list[tuple[np.ndarray, np.ndarray, np.ndarray]]
@@ -35,23 +38,45 @@ class ShardedTopology:
 		response_bytes: int = 256 * 1024**2,
 		timeout: float = 30,
 		profiling: bool = False,
+		storage_budgets: Optional[tuple[StorageNodeBudget, ...]] = None,
+		storage_endpoints: Optional[tuple[str, ...]] = None,
+		storage_authkey: str = "neutronrt",
 	) -> None:
 		if directory is not None:
 			Path(directory).mkdir(parents=True, exist_ok=True)
 		self._folder = TemporaryDirectory(prefix="neutronrt-topology-", dir=directory)
 		self.response_bytes = response_bytes
+		self.storage: LocalStorage | RemoteStorage
 		started = perf_counter()
 		try:
 			self.base = BaseTopology.export(graph, Path(self._folder.name))
+			budgets = storage_budgets or tuple(StorageNodeBudget(f"local-{index}") for index in range(partitions))
+			if len(budgets) != partitions:
+				raise ValueError("One storage budget is required per storage partition")
+			require_capacity(self.base, budgets)
+			self.capacity = capacity_manifest(self.base, budgets)
 			export_done = perf_counter()
-			self.storage = LocalStorage(
-				self.base,
-				partitions,
-				overlay_bytes=overlay_bytes,
-				response_bytes=response_bytes,
-				timeout=timeout,
-				profiling=profiling,
-			)
+			if storage_endpoints is None:
+				self.storage = LocalStorage(
+					self.base,
+					partitions,
+					overlay_bytes=overlay_bytes,
+					response_bytes=response_bytes,
+					timeout=timeout,
+					profiling=profiling,
+				)
+			else:
+				if len(storage_endpoints) != partitions:
+					raise ValueError("One remote storage endpoint is required per storage partition")
+				self.storage = RemoteStorage(
+					self.base,
+					storage_endpoints,
+					budgets=budgets,
+					authkey=storage_authkey.encode(),
+					overlay_bytes=overlay_bytes,
+					response_bytes=response_bytes,
+					timeout=timeout,
+				)
 		except BaseException:
 			self._folder.cleanup()
 			raise
@@ -61,6 +86,7 @@ class ShardedTopology:
 			"base_file_bytes": sum(
 				path.stat().st_size for direction in ("in", "out") for path in self.base.files(direction)
 			),
+			"capacity": self.capacity,
 		}
 		self.revision, self.edges = 0, self.base.edges
 
@@ -134,7 +160,7 @@ class ShardedTopology:
 		"""
 		values = self._nodes(nodes)
 		groups = self.storage.groups(values)
-		descriptors: dict[int, tuple[int, int, int]] = {}
+		descriptors: dict[int, Any] = {}
 		with self.storage.locked(groups), ExitStack() as stack:
 			try:
 				degrees = self.storage.exchange({i: ("degrees", direction, values[p]) for i, p in groups.items()})
@@ -151,7 +177,11 @@ class ShardedTopology:
 				}
 				self.storage.exchange(requests, results=descriptors)
 				arrays = []
-				for index, (fd, count, edges) in descriptors.items():
+				for index, response in descriptors.items():
+					if isinstance(response, tuple) and response and response[0] == "remote-rows":
+						arrays.append((groups[index], response[1], response[2]))
+						continue
+					fd, count, edges = response
 					mapping = mmap.mmap(fd, max(8, (count + edges) * 8), access=mmap.ACCESS_READ)
 					stack.callback(mapping.close)
 					array = np.ndarray((count + edges,), dtype=np.int64, buffer=mapping)
@@ -160,7 +190,10 @@ class ShardedTopology:
 				return consume(arrays)
 			finally:
 				# The kernel frees each anonymous buffer after its last FD/mapping closes.
-				for fd, _, _ in descriptors.values():
+				for response in descriptors.values():
+					if isinstance(response, tuple) and response and response[0] == "remote-rows":
+						continue
+					fd, _, _ = response
 					os.close(fd)
 
 	def expand(self, frontier: Tensor, edge_nodes: Tensor) -> Tensor:

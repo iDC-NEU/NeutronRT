@@ -17,7 +17,7 @@ def test_summary_preserves_failed_cases_and_does_not_hide_accuracy_costs():
 	report = markdown_report(
 		{"runs": [valid, {"case": "failed", "valid": False}], "comparisons": [{"case": "optimized", "verdict": "gain"}]}
 	)
-	assert "optimized | 1/1 | 20.00 | 30.00 | 5 | 10 | 0 | 0 | 1.00 | 20.00 | 0.5 | 2.000 | gain" in report
+	assert "optimized | 1/1 | 20.00 | 30.00 | 5 | 10 | 0 | 0 | 1.00 | — | 20.00 | 0.5 | 2.000 | gain" in report
 	assert "failed | 0/1" in report and "invalid" in report
 	assert "rather than the entire official test split" in report
 

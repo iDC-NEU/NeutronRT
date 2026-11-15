@@ -21,6 +21,7 @@ from lib.runtime.config import RuntimeFeatures
 from lib.runtime.data_plane import RemoteEmbeddingPlane
 from lib.runtime.launch import Placement, WorkerSettings, join_world, resolve_devices, run_worker
 from lib.runtime.transport import OwnedTransport, RemoteEndpoint
+from lib.storage.capacity import GIB, StorageNodeBudget
 
 if TYPE_CHECKING:
 	from lib.storage.pma import PMATopology
@@ -56,6 +57,11 @@ class ManagedRuntime:
 		storage_directory: Optional[str] = None,
 		storage_overlay_bytes: int = 256 * 1024**2,
 		storage_response_bytes: int = 256 * 1024**2,
+		storage_node_names: Optional[Sequence[str]] = None,
+		storage_node_capacity_bytes: int = 512 * GIB,
+		storage_node_reserve_bytes: int = 64 * GIB,
+		storage_endpoints: Optional[Sequence[str]] = None,
+		storage_authkey: str = "neutronrt",
 		delta_max_steps: int = 32,
 		delta_anchor_bytes: Optional[int] = None,
 		placement: Optional[Placement] = None,
@@ -69,6 +75,9 @@ class ManagedRuntime:
 			(not devices and (placement is None or placement.rank is None))
 			or worker_bytes < 1
 			or storage_bytes < 0
+			or storage_node_capacity_bytes < 1
+			or storage_node_reserve_bytes < 0
+			or storage_node_reserve_bytes >= storage_node_capacity_bytes
 			or timeout <= 0
 			or max_retries < 0
 		):
@@ -185,6 +194,14 @@ class ManagedRuntime:
 		self._world_sequence = 0
 		self.reset_count = 0
 		self._folder = TemporaryDirectory(prefix="neutronrt-workers-")
+		storage_names = tuple(storage_node_names or (f"local-{index}" for index in range(storage_partitions)))
+		if len(storage_names) != storage_partitions or len(set(storage_names)) != len(storage_names):
+			raise ValueError("Storage node names must be distinct and match storage_partitions")
+		if storage_endpoints is not None and len(storage_endpoints) != storage_partitions:
+			raise ValueError("One storage endpoint is required per storage partition")
+		self.storage_budgets = tuple(
+			StorageNodeBudget(name, storage_node_capacity_bytes, storage_node_reserve_bytes) for name in storage_names
+		)
 		self.plane: Optional[RemoteEmbeddingPlane] = None
 		self.topology: Optional[Union["PMATopology", "ShardedTopology"]] = None
 		try:
@@ -204,6 +221,9 @@ class ManagedRuntime:
 					response_bytes=storage_response_bytes,
 					timeout=timeout,
 					profiling=switches.profiling,
+					storage_budgets=self.storage_budgets,
+					storage_endpoints=tuple(storage_endpoints) if storage_endpoints is not None else None,
+					storage_authkey=storage_authkey,
 				)
 				graph = cast(DGLGraph, self.topology)
 				service_options["frontier_expander"] = self.topology.expand

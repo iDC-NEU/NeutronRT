@@ -14,6 +14,11 @@ from lib.profiling.experiment import paired_comparison
 from lib.profiling.metrics import REFERENCE_URL, latency_envelope
 
 
+def median_mib(rows: list[dict], name: str) -> str:
+	values = [row[name] for row in rows if row[name] is not None]
+	return f"{median(values) / 1024**2:.2f}" if values else "—"
+
+
 def aggregate(inputs: list[Path]) -> dict:
 	if len({path.name for path in inputs}) != len(inputs):
 		raise ValueError("Input directories must have distinct names for unambiguous cohort labels")
@@ -62,6 +67,12 @@ def aggregate(inputs: list[Path]) -> dict:
 					"gpu_peak_allocated_sum_bytes": sum(v or 0 for v in metrics["memory"]["gpu_peak_allocated_bytes"]),
 					"history_cpu_bytes": metrics["memory"]["historical_cpu_tensor_bytes"],
 					"p2p_payload_bytes": metrics["communication"]["send_payload_bytes"],
+					"network_bytes_sent": (metrics["communication"].get("network") or {})
+					.get("totals", {})
+					.get("bytes_sent"),
+					"network_bytes_recv": (metrics["communication"].get("network") or {})
+					.get("totals", {})
+					.get("bytes_recv"),
 					"embedding_mse": metrics["embedding_mse"],
 					"prediction_disagreement_fraction": sum(c["prediction_disagreements"] for c in trial["correctness"])
 					/ sum(c["rows"] for c in trial["correctness"]),
@@ -196,6 +207,30 @@ def comparison_table(report: dict) -> str:
 					f"| {cohort} | {model} | {method} | {max(r['embedding_mse'] for r in group):.4g} | "
 					f"{median(r['prediction_disagreement_fraction'] for r in group) * 100:.2f} |"
 				)
+	lines.extend(
+		[
+			"",
+			"Measured communication counters are reported separately from application payloads.",
+			"NIC counters are host-interface totals and may include unrelated traffic; missing counters remain `—`.",
+			"",
+			"| Cohort | Model | Method | P2P payload (MiB) | NIC sent (MiB) | NIC received (MiB) |",
+			"| --- | --- | --- | ---: | ---: | ---: |",
+		]
+	)
+	for cohort, model in groups:
+		for method in METHODS:
+			group = [
+				r
+				for r in rows
+				if r["cohort"] == cohort and r["model"] == model and r["method"] == method and r["valid"]
+			]
+			if not group:
+				continue
+
+			lines.append(
+				f"| {cohort} | {model} | {method} | {median_mib(group, 'p2p_payload_bytes')} | "
+				f"{median_mib(group, 'network_bytes_sent')} | {median_mib(group, 'network_bytes_recv')} |"
+			)
 	return "\n".join(lines) + "\n"
 
 

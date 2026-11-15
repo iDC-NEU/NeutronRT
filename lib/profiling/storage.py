@@ -16,7 +16,9 @@ def start(topology) -> tuple[Optional[dict], dict]:
 	if topology is None:
 		return None, {}
 	before = topology.storage.stats()
-	samplers = {}
+	samplers: dict[int, MemorySampler] = {}
+	if getattr(topology.storage, "remote", False):
+		return before, samplers
 	for index, process in enumerate(topology.storage.processes):
 		actor = psutil.Process(process.pid)
 		sampler = MemorySampler(read=partial(_rss, actor))
@@ -34,7 +36,15 @@ def stop(topology, before: Optional[dict], samplers: dict) -> Optional[dict]:
 	for index, value in after.items():
 		previous = before[index]
 		partitions[index] = {
-			"rss": rss[index],
+			"rss": rss.get(
+				index,
+				{
+					"start_bytes": previous.get("rss_bytes", 0),
+					"peak_bytes": value.get("rss_bytes", 0),
+					"end_bytes": value.get("rss_bytes", 0),
+					"samples": 1,
+				},
+			),
 			"memory_end": {
 				name: value[name]
 				for name in (

@@ -11,6 +11,9 @@ from lib.graph.methods import method_from_switches
 from lib.graph.serving import UpdateResult
 from lib.profiling.communication import ProfiledCommManager
 from lib.profiling.control import start_workers, stop_workers
+from lib.profiling.network import NetworkSnapshot
+from lib.profiling.network import delta as network_delta
+from lib.profiling.network import snapshot as network_snapshot
 from lib.profiling.recorder import MemorySampler
 from lib.profiling.residency import retained_state
 from lib.profiling.storage import start as start_storage
@@ -38,7 +41,7 @@ class RuntimeProfiler:
 	be blindly added. A worker-world reset invalidates normal-throughput comparison.
 	"""
 
-	def __init__(self, runtime: "ManagedRuntime") -> None:
+	def __init__(self, runtime: "ManagedRuntime", *, network_interfaces: Optional[List[str]] = None) -> None:
 		if not runtime.switches.profiling or not isinstance(runtime.comm, ProfiledCommManager) or runtime.plane is None:
 			raise ValueError("Runtime profiling must be enabled before starting the worker world")
 		self.runtime = runtime
@@ -51,6 +54,8 @@ class RuntimeProfiler:
 		self._storage_before: Optional[dict] = None
 		self._storage_samplers: dict = {}
 		self._before: dict = {}
+		self._network_interfaces = tuple(network_interfaces) if network_interfaces is not None else None
+		self._network_before: Optional[NetworkSnapshot] = None
 		self._reset_count = 0
 		self._first_update = self._last_update = 0
 		self._install()
@@ -158,6 +163,7 @@ class RuntimeProfiler:
 			self._reset_count = self.runtime.reset_count
 			start_workers(self.transport, trace=trace, trace_task_limit=trace_task_limit)
 			self._storage_before, self._storage_samplers = start_storage(getattr(self.runtime, "topology", None))
+			self._network_before = network_snapshot(self._network_interfaces)
 			self._rss = MemorySampler()
 			self._rss.start()
 			path = None
@@ -186,6 +192,10 @@ class RuntimeProfiler:
 			root = self.recorder.stop()
 			root["rss"] = self._rss.stop()
 			self._rss = None
+			if self._network_before is None:
+				raise RuntimeError("Network measurement window was not initialized")
+			network = network_delta(self._network_before, network_snapshot(self._network_interfaces))
+			self._network_before = None
 			reset = self.runtime.reset_count != self._reset_count
 			workers = [] if reset else stop_workers(self.transport)
 			storage = stop_storage(
@@ -207,7 +217,7 @@ class RuntimeProfiler:
 			)
 			sparse = getattr(service, "_delta", None)
 			return {
-				"schema_version": 1,
+				"schema_version": 2,
 				"method": method_from_switches(self.runtime.switches.as_dict(), policy=service.planner.policy),
 				"neighborhood_policy": {
 					"fanout": service.planner.policy.fanout,
@@ -248,6 +258,7 @@ class RuntimeProfiler:
 						if name.startswith("p2p.send.") and name.endswith(".operations")
 					),
 				},
+				"network": network,
 			}
 
 	def close(self) -> None:
@@ -258,6 +269,7 @@ class RuntimeProfiler:
 			for sampler in self._storage_samplers.values():
 				sampler.stop()
 			self._storage_samplers = {}
+			self._network_before = None
 			for target, name, previous, had_instance in reversed(self._patched):
 				if had_instance:
 					setattr(target, name, previous)
