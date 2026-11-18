@@ -183,7 +183,7 @@ def _run_nrt(
 		"actual_pipeline": False,
 		"execution_mode": "single_device_resident_sparse_aggregate",
 		"scope": (
-			"GPU-resident graph, features, weights, embeddings and projected aggregate state; "
+			f"{device.type.upper()}-resident graph, features, weights, embeddings and projected aggregate state; "
 			"CPU control and query return only"
 		),
 		"remote_dispatch": False,
@@ -292,8 +292,8 @@ def main(
 	if recording.spec.name != "sage":
 		raise typer.BadParameter("Resident replay currently supports mean GraphSAGE")
 	device_ = torch.device(device)
-	if device_.type != "cuda" or device_.index is None:
-		raise typer.BadParameter("Resident replay requires an explicit CUDA device, such as cuda:0")
+	if device_.type not in ("cpu", "cuda") or (device_.type == "cuda" and device_.index is None):
+		raise typer.BadParameter("Resident replay requires cpu or an explicit CUDA device, such as cuda:0")
 	graph = load_graph(data)
 	features = graph.ndata.pop("feat")
 	labels_value, test_mask = load_test_labels(labels, test_split, graph.num_nodes())

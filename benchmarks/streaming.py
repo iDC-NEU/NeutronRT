@@ -145,8 +145,8 @@ def run(
 		raise ValueError("Unsupported recorded initialization mode")
 	if not recording.steps or not recording.verification_nodes.numel():
 		raise ValueError("A streaming comparison requires measured steps and verification rows")
-	if resident and (device.type != "cuda" or output_device != device):
-		raise ValueError("Resident native replay requires an explicit CUDA device and CUDA output cache")
+	if resident and (device.type not in ("cpu", "cuda") or output_device != device):
+		raise ValueError("Resident native replay requires graph, model and output cache on the same CPU or CUDA device")
 	if resident and (resident_capacity_bytes is None or resident_capacity_bytes < 1):
 		raise ValueError("Resident native replay requires an explicit positive capacity")
 	output.mkdir(parents=True, exist_ok=False)
@@ -361,7 +361,7 @@ def run(
 				"residual",
 			],
 			"resident_phase_scope": (
-				"native GPU replay exposes exclusive response phases from shared request "
+				"native resident replay exposes exclusive response phases from shared request "
 				"preparation through publication"
 				if resident
 				else "not_applicable"
