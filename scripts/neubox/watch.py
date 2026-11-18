@@ -76,12 +76,14 @@ def _callback_timeout() -> float:
 		return _CALLBACK_SECONDS
 
 
-def _queue_callback(receipt_path: Path, output: Path, task_ids: list[str], thread: str, receipt: dict) -> None:
+def _queue_callback(
+	receipt_path: Path, output: Path, task_ids: list[str], thread: str, receipt: dict, message: str | None = None
+) -> None:
 	receipt["callback_attempted"] = True
 	receipt["callback_status"] = "starting"
 	with suppress(OSError):
 		_atomic_write(receipt_path, receipt)
-	message = (
+	message = message or (
 		f"Automated neu-sbox watch callback: tasks {', '.join(task_ids)}; monitor exit {receipt['monitor_exit']}. "
 		f"Log: {output.resolve() / 'watch.jsonl'}. Check task health and experiment progress now. "
 		"If tasks remain active, renew one bounded watch with this callback. Do not resubmit experiments."
