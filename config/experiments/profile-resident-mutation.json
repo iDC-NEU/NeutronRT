@@ -1,0 +1,9 @@
+{
+  "id": "frozen-resident-mutation-diagnostic-v1",
+  "purpose": "Nested synchronized diagnostic of previous implementation; not paper performance",
+  "hardware_profile": "baseline-gpu",
+  "wall_seconds": 600,
+  "required_files": ["/home/lhr/NeutronRT/logs/submissions/a9ba1ae47ad1421680f003c861cc287f/source/source-snapshot.json"],
+  "environment": {"OMP_NUM_THREADS": "4", "MKL_NUM_THREADS": "4", "OPENBLAS_NUM_THREADS": "4"},
+  "command": ["{python}", "-m", "scripts.validate.resident_mutation_profile", "--frozen-source", "/home/lhr/NeutronRT/logs/submissions/a9ba1ae47ad1421680f003c861cc287f/source", "--output", "{output}/report"]
+}

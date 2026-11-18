@@ -6,7 +6,7 @@ import dgl
 import pytest
 import torch
 
-from benchmarks.dgl import infer_batches
+from benchmarks.dgl import infer_batches, layerwise_infer
 from lib.models import GNNModel
 
 
@@ -73,6 +73,21 @@ def test_sampled_layers_have_complete_dependencies_and_apply_fanout_everywhere(f
 	model = ObservedModel("sage", 4, 8, 3, 3).eval().to(device)
 	batches = list(infer_batches(graph, features, model, torch.arange(32), fanout=fanout, batch_size=7))
 	assert torch.cat([value for _, value in batches]).shape == (32, 3)
+
+
+@pytest.mark.parametrize("layers", [2, 3])
+def test_official_layerwise_bootstrap_matches_full_reference_with_partial_batch_and_isolated_nodes(layers):
+	torch.manual_seed(71)
+	graph = dgl.graph((torch.tensor([0, 0, 1, 2, 4]), torch.tensor([1, 1, 2, 3, 3])), num_nodes=7)
+	features = torch.randn(7, 4)
+	model = GNNModel("sage", 4, 8, 3, layers).eval()
+	expected = features
+	for index in range(layers):
+		expected = mean_sage(model.layers[index], graph, expected, activate=index + 1 < layers)
+	actual, timing = layerwise_infer(graph, features, model, batch_size=3)
+	torch.testing.assert_close(actual, expected, atol=1e-6, rtol=1e-5)
+	assert timing["layers"] == layers and timing["batches"] == layers * 3
+	assert timing["temporary_intermediate_bytes_peak"] > 0
 
 
 @pytest.mark.parametrize("fanout", [0, -1, True])

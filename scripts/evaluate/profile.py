@@ -65,7 +65,7 @@ def _server(connection, case, options, spec, folder):
 			graph = load_graph_data(Path(options["data"]), add_inverse_edges=options["add_inverse_edges"])
 			features = graph.ndata.pop("feat")
 			graph.create_formats_()
-			identity = _identity(graph, features, spec)
+			identity = _identity(graph, features, spec, configuration=case.profile_configuration())
 			with ExitStack() as stack:
 				runtime = stack.enter_context(
 					ManagedRuntime(
@@ -86,6 +86,14 @@ def _server(connection, case, options, spec, folder):
 						idle_flush_seconds=case.idle_flush_seconds,
 						delta_max_steps=case.delta_max_steps,
 						delta_anchor_bytes=case.delta_anchor_bytes,
+						worker_feature_cache_bytes=case.worker_feature_cache_bytes,
+						dispatch_mode=case.dispatch_mode,
+						dispatch_locality_weight=case.dispatch_locality_weight,
+						dispatch_load_weight=case.dispatch_load_weight,
+						deferred_mode=case.managed_deferred_mode,
+						deferred_window_seconds=case.deferred_window_seconds,
+						hotspot_degree_threshold=case.hotspot_degree_threshold,
+						hotspot_max_changes=case.hotspot_max_changes,
 					)
 				)
 				graph = runtime.service.graph
@@ -94,8 +102,6 @@ def _server(connection, case, options, spec, folder):
 				nodes = torch.arange(graph.num_nodes())
 				for layer in range(1, spec.layers + 1):
 					runtime.service.ensure(nodes, layer)
-				profiler = stack.enter_context(RuntimeProfiler(runtime))
-				assert runtime.plane is not None
 				frontend = OwnedServicer(
 					runtime.service,
 					runtime.plane.storage.owner,
@@ -103,6 +109,8 @@ def _server(connection, case, options, spec, folder):
 					max_tickets=max(1024, case.max_inflight * 2),
 				)
 				stack.callback(frontend.close)
+				profiler = stack.enter_context(RuntimeProfiler(runtime, admission=frontend.admission))
+				assert runtime.plane is not None
 				executor = stack.enter_context(ThreadPoolExecutor(max_workers=8))
 				server = grpc.server(executor, options=message_options())
 				stack.callback(lambda: server.stop(5).wait())
@@ -115,6 +123,10 @@ def _server(connection, case, options, spec, folder):
 					{
 						"address": f"127.0.0.1:{port}",
 						"identity": identity,
+						"profile_configuration": case.profile_configuration(),
+						"policy": (
+							runtime.service.profile() if callable(getattr(runtime.service, "profile", None)) else None
+						),
 						"switches": runtime.switches.as_dict(),
 						"initialized_rows_per_layer": graph.num_nodes(),
 					}
@@ -372,8 +384,10 @@ def run_case(
 				"valid": profile["valid"],
 				"trace_pass": trace_pass,
 				"settings": asdict(case),
+				"profile_configuration": case.profile_configuration(),
 				**client,
 				"enabled_switches": ready["switches"],
+				"startup_policy": ready["policy"],
 				"profile": profile,
 				"engine_seconds": profile["engine"]["completion_window_seconds"],
 				"query_accuracy": metrics,
@@ -545,7 +559,9 @@ def _run(args: Options) -> None:
 		)
 	except ValueError as error:
 		raise typer.BadParameter(str(error)) from error
-	identity = _identity(graph, features, spec)
+	identities = {
+		case.name: _identity(graph, features, spec, configuration=case.profile_configuration()) for case in cases
+	}
 	trace = make_trace(
 		features,
 		updates=args.warmup + args.updates,
@@ -582,6 +598,7 @@ def _run(args: Options) -> None:
 	options = {**vars(args), "data": str(args.data.resolve()), "output": str(args.output.resolve())}
 
 	def attempt(case, repetition, *, trace_pass=False):
+		case_identity = identities[case.name]
 		try:
 			return run_case(
 				case,
@@ -592,7 +609,7 @@ def _run(args: Options) -> None:
 				oracles,
 				labels,
 				test_mask,
-				identity,
+				case_identity,
 				repetition,
 				trace_pass=trace_pass,
 			)
@@ -602,7 +619,7 @@ def _run(args: Options) -> None:
 				"repetition": repetition,
 				"valid": False,
 				"trace_pass": trace_pass,
-				"identity": identity,
+				"identity": case_identity,
 				"trace_digest": trace_digest(trace),
 				"client_seconds": None,
 				"error": traceback.format_exc(),
@@ -659,7 +676,8 @@ def _run(args: Options) -> None:
 		"schema_version": 1,
 		"dataset": "ogbn-arxiv",
 		"model": asdict(spec),
-		"identity": identity,
+		"identity": identities,
+		"profile_configurations": {case.name: case.profile_configuration() for case in cases},
 		"trace_digest": trace_digest(trace),
 		"cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
 		"scope": "Local-host RPC client, separate CPU storage process, and process-owned GNN workers",

@@ -1,6 +1,6 @@
 """Storage-planned sparse updates, with selected full-neighbor fallbacks."""
 
-from contextlib import ExitStack, suppress
+from contextlib import ExitStack
 from typing import TYPE_CHECKING, Sequence, Union
 
 import torch
@@ -24,10 +24,11 @@ class DeltaExecution:
 		self.state, self.service = state, state.service
 		self.inputs = DeltaInputs(self.service)
 
-	def full(self, layer: int, nodes: Tensor, *, refresh: bool = False) -> None:
+	def full(self, layer: int, nodes: Tensor, *, refresh: bool = False, reason: str) -> None:
 		service = self.service
 		service._run(nodes, layer)
 		service.counters.delta_fallback_tasks += 1
+		service.fallbacks.add(layer, reason, nodes.numel())
 		if refresh:
 			service.counters.delta_refresh_rows += nodes.numel()
 
@@ -36,6 +37,7 @@ class DeltaExecution:
 		assert context is not None
 		layer, targets = prepared.affected.layer, prepared.affected.targets
 		plan = None
+		fallback_reason = "cold_or_unavailable_state"
 		if context.enabled:
 			changed = (
 				context.mutation.features.nodes
@@ -45,7 +47,7 @@ class DeltaExecution:
 				else context.layers[layer - 1].embeddings.snapshot.nodes
 			)
 			edges = context.mutation.edges
-			with suppress(PlanTooLarge):
+			try:
 				plan = compile_delta_routes(
 					service.graph,
 					changed,
@@ -54,15 +56,18 @@ class DeltaExecution:
 					edges.weights,
 					max_edges=service.planner.max_edges if service.planner.max_edges is not None else 1_000_000,
 				)
+			except PlanTooLarge:
+				fallback_reason = "plan_edge_budget"
 			if plan is not None and not torch.equal(plan.targets, targets):
 				plan = None
+				fallback_reason = "incomplete_delta_target_coverage"
 		for start in range(0, targets.numel(), service.batch_size):
 			stop = min(start + service.batch_size, targets.numel())
 			nodes = targets[start:stop]
 			if service._state_available(layer, nodes, service.catalog.version).all():
 				continue
 			if plan is None:
-				self.full(layer, nodes)
+				self.full(layer, nodes, reason=fallback_reason)
 			else:
 				service._run_delta(layer, slice_delta_routes(plan, start, stop))
 			service._yield_compute()
@@ -71,17 +76,17 @@ class DeltaExecution:
 	def run(self, layer: int, plan: SparseLayerPlan) -> None:
 		service, context = self.service, self.state.active
 		if context is None or not context.enabled or layer not in context.layers:
-			return self.full(layer, plan.targets)
+			return self.full(layer, plan.targets, reason="cold_or_unavailable_state")
 		anchors = context.layers[layer].aggregates
 		selected = anchors.lookup(plan.targets)
 		if not selected.available.all():
-			return self.full(layer, plan.targets)
+			return self.full(layer, plan.targets, reason="missing_aggregate_anchor")
 		next_depth: Union[int, Tensor]
 		if self.state.row_refresh:
 			depth = self.state.row_depths(selected.selections, plan.targets.numel())
 			expired = depth >= self.state.max_steps
 			if expired.any():
-				self.full(layer, plan.targets[expired], refresh=True)
+				self.full(layer, plan.targets[expired], refresh=True, reason="periodic_refresh")
 				if not expired.all():
 					service.counters.delta_partial_refreshes += 1
 					self.run(layer, select_delta_routes(plan, (~expired).nonzero().flatten()))
@@ -90,7 +95,7 @@ class DeltaExecution:
 		else:
 			maximum = self.state.depth([group.key for group in selected.selections])
 			if maximum >= self.state.max_steps:
-				return self.full(layer, plan.targets, refresh=True)
+				return self.full(layer, plan.targets, refresh=True, reason="periodic_refresh")
 			next_depth = maximum + 1
 		recipes = None
 		if layer > 1 and service.aggregate_only:
@@ -98,52 +103,61 @@ class DeltaExecution:
 			try:
 				recipes.prepare()
 			except MissingState:
-				return self.full(layer, plan.targets)
+				return self.full(layer, plan.targets, reason="missing_aggregate_anchor")
 		elif layer > 1:
 			previous = context.layers[layer - 1].embeddings
 			if not previous.lookup(plan.inputs.value_nodes).available.all():
-				return self.full(layer, plan.targets)
+				return self.full(layer, plan.targets, reason="missing_previous_embedding")
 			try:
 				self.inputs.prepare_old(previous, plan.edges.value_nodes)
 			except MissingState:
-				return self.full(layer, plan.targets)
+				return self.full(layer, plan.targets, reason="missing_previous_embedding")
 			service._ensure_rows(torch.cat((plan.targets, plan.inputs.value_nodes)).unique(sorted=True), layer - 1)
-		plane, worker = service.remote_plane, service._pick()
-		output_bytes = 2 * plan.targets.numel() * service.widths[layer] * 4
-		required = output_bytes
-		if recipes is not None:
-			required += recipes.workspace_bytes
-			if required > worker.max_bytes:
-				service.counters.delta_workspace_fallbacks += 1
-				return self.full(layer, plan.targets)
-		with ExitStack() as temporary:
-			tables: Sequence[InputTable]
+		plane = service.remote_plane
+		task_cost = max(1, plan.targets.numel() + plan.inputs.sources.numel() + plan.edges.sources.numel())
+		worker = service._pick(
+			required=plan.inputs.value_nodes,
+			input_layer=layer - 1,
+			task_cost=task_cost,
+		)
+		try:
+			output_bytes = 2 * plan.targets.numel() * service.widths[layer] * 4
+			required = output_bytes
 			if recipes is not None:
-				workspace = temporary.enter_context(
-					recipes.temporary.workspace(worker.owner, required, output_bytes=output_bytes)
-				)
-				tables = recipes.tables(worker.owner, temporary, workspace)
-			else:
-				tables = self._retained_tables(layer, plan, worker.owner)
-				admission = delta_workspace(plan, service.widths, layer, tables)
-				# CPU row budgets bound retained cache, not host tensor working memory.
-				# CUDA workers must leave device headroom before receiving any inputs.
-				cuda = worker.device.type == "cuda"
-				if cuda and admission.required_bytes > worker.max_bytes or admission.frame_bytes > 512 * 1024**2:
-					if plan.targets.numel() < 2:
-						service.counters.delta_workspace_fallbacks += 1
-						return self.full(layer, plan.targets)
-					service.counters.delta_workspace_splits += 1
-					middle = plan.targets.numel() // 2
-					# Release CPU feature selections before recursively sizing child plans.
-					del tables
-					self.run(layer, slice_delta_routes(plan, 0, middle))
-					self.run(layer, slice_delta_routes(plan, middle, plan.targets.numel()))
-					return
-				plane.make_room(worker.owner, admission.required_bytes if cuda else output_bytes)
-				# Admission can move retained rows to CPU; refresh their certified routes.
-				tables = self._retained_tables(layer, plan, worker.owner)
-			self._submit(layer, plan, worker.owner, tables, next_depth)
+				required += recipes.workspace_bytes
+				if required > worker.max_bytes:
+					service.counters.delta_workspace_fallbacks += 1
+					return self.full(layer, plan.targets, reason="workspace_capacity")
+			with ExitStack() as temporary:
+				tables: Sequence[InputTable]
+				if recipes is not None:
+					workspace = temporary.enter_context(
+						recipes.temporary.workspace(worker.owner, required, output_bytes=output_bytes)
+					)
+					tables = recipes.tables(worker.owner, temporary, workspace)
+				else:
+					tables = self._retained_tables(layer, plan, worker.owner)
+					admission = delta_workspace(plan, service.widths, layer, tables)
+					# CPU row budgets bound retained cache, not host tensor working memory.
+					# CUDA workers must leave device headroom before receiving any inputs.
+					cuda = worker.device.type == "cuda"
+					if cuda and admission.required_bytes > worker.max_bytes or admission.frame_bytes > 512 * 1024**2:
+						if plan.targets.numel() < 2:
+							service.counters.delta_workspace_fallbacks += 1
+							return self.full(layer, plan.targets, reason="workspace_capacity")
+						service.counters.delta_workspace_splits += 1
+						middle = plan.targets.numel() // 2
+						# Release CPU feature selections before recursively sizing child plans.
+						del tables
+						self.run(layer, slice_delta_routes(plan, 0, middle))
+						self.run(layer, slice_delta_routes(plan, middle, plan.targets.numel()))
+						return
+					plane.make_room(worker.owner, admission.required_bytes if cuda else output_bytes)
+					# Admission can move retained rows to CPU; refresh their certified routes.
+					tables = self._retained_tables(layer, plan, worker.owner)
+				self._submit(layer, plan, worker.owner, tables, next_depth)
+		finally:
+			service._release_dispatch(worker)
 
 	def _retained_tables(self, layer: int, plan: SparseLayerPlan, target: Owner) -> Sequence[InputTable]:
 		context = self.state.active

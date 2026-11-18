@@ -80,7 +80,46 @@ Distributed trial reports include `workload_counts` for warmup, measured and tot
 requests, with per-request sizes. Edge counts refer to requested directed pairs;
 deleting a pair removes all matching parallel edges, and an absent pair is a no-op.
 
+### Completion and profile observability
+
+Admitted updates retain optional server-monotonic lifecycle metadata: input and
+publication versions, admission, executor start, staging, publication/completion,
+and the server reply-preparation boundary. Queue wait, admission-side execution,
+and deferred-publication wait are separate fields; these timestamps are not mixed
+with client clocks. A client that needs receive time must record its own local
+timestamp. Profile windows can attach an `UpdateAdmission` observer to reject
+pending or failed admitted work at the measurement boundary.
+
+Remote storage profiles sample RSS through a low-rate endpoint-only command. Reports
+distinguish sampled RSS peaks from start/end RSS and end-of-window logical overlay
+bytes, and retain sample counts, interval, errors, and sampler shutdown state.
+
+### Remote mapped storage
+
+Remote mapped storage uses a persistent base exported from the exact graph used by
+the evaluator. After loading that graph in the `graph` environment, prepare a base
+directory once:
+
+```python
+from pathlib import Path
+from lib.storage.base import BaseTopology
+
+BaseTopology.export(graph, Path("/data/neutronrt-base"))
+```
+
+Make an equivalent export available to each storage server and start each server
+with its local `--base` path. Paths may differ between machines; the evaluator
+and servers verify the graph content and dimensions. Pass the evaluator's local
+path with `--topology mapped --topology-base /data/neutronrt-base` and repeat
+`--storage-endpoint HOST:PORT` once per storage partition. The exported base is
+reused and remains on disk when the evaluator exits.
+
 ## Layout
+
+Dedicated standard and published-system baselines are documented in
+[`benchmarks/README.md`](benchmarks/README.md). They execute separately from
+NeutronRT; framework-hosted Full/NS/UER are mechanism ablations, not reproductions
+of external systems. Source pins and comparison roles are in `benchmarks/sources.json`.
 
 - `lib/`: models, graph/storage, runtime, RPC, communication and profiling.
 - `scripts/`: launch, preparation, validation and evaluation commands.

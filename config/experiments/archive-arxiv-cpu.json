@@ -1,0 +1,16 @@
+{
+  "id": "archive-arxiv-cpu-20261116",
+  "hardware_profile": "peer-cpu",
+  "wall_seconds": 300,
+  "environment": {
+    "CUDA_VISIBLE_DEVICES": "",
+    "OMP_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1"
+  },
+  "command": [
+    "{python}",
+    "-c",
+    "import shutil; shutil.copytree('/home/lhr/NeutronRT/logs/experiments/arxiv-deferred-cpu-20261116-v1', '/mnt/nfs0/lvhr/neutronrt-results/arxiv-deferred-cpu-20261116-v1/raw')"
+  ]
+}

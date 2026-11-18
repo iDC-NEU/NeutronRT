@@ -187,3 +187,22 @@ def test_undrained_window_is_invalid_and_stop_does_not_execute_unmeasured_work(m
 	finally:
 		deferred.close()
 		plane.close()
+
+
+def test_attached_admission_window_reports_safe_counter_deltas(monkeypatch):
+	runtime, plane, _ = _runtime(monkeypatch)
+	admission = UpdateAdmission(runtime.service)
+	try:
+		with RuntimeProfiler(runtime, admission=admission) as profiler:
+			profiler.start()
+			admission.sync(UpdateKind.FEATURES, torch.tensor([1]), runtime.service.features[[1]] + 1)
+			report = profiler.stop()
+		assert report["valid"]
+		assert report["admission_window"] == {"admitted": 1, "completed": 1, "failed": 0, "pending_at_stop": 0}
+		assert report["instrumentation"]["counter_resets"] == []
+		assert "reset_semantics" in report["instrumentation"]
+		assert report["policy_window"]["after"]["dispatch"]["mode"] == "round_robin"
+		assert report["policy_window"]["counter_resets"] == []
+	finally:
+		admission.close()
+		plane.close()

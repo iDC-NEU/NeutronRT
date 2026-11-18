@@ -1,0 +1,32 @@
+{
+  "id": "resident-arxiv-gpu-20261117-v1",
+  "hardware_profile": "baseline-gpu",
+  "wall_seconds": 37000,
+  "environment": {
+    "OMP_NUM_THREADS": "4",
+    "MKL_NUM_THREADS": "4",
+    "OPENBLAS_NUM_THREADS": "4"
+  },
+  "required_files": [
+    "/mnt/nfs0/lvhr/neutronrt-results/preparation/topology-five-20261116-v1/topologies/arxiv/graph.bin",
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/checkpoints/sage-arxiv.pt",
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/arxiv/raw/node-label.csv.gz",
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/arxiv/split/time/test.csv.gz",
+    "scripts/evaluate/resident.py",
+    "lib/graph/resident_runtime.py"
+  ],
+  "hash_files": [
+    "config/experiments/resident-arxiv-gpu-trials.json",
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/checkpoints/sage-arxiv.pt",
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/arxiv/raw/node-label.csv.gz",
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/arxiv/split/time/test.csv.gz"
+  ],
+  "command": [
+    "{python}",
+    "-m",
+    "scripts.evaluate.cohort",
+    "config/experiments/resident-arxiv-gpu-trials.json",
+    "--output",
+    "{output}/cohort"
+  ]
+}

@@ -1,0 +1,261 @@
+[
+  {
+    "name": "operator-recompute",
+    "devices": ["cpu", "cpu"],
+    "interface": "async",
+    "max_inflight": 8,
+    "query_every": 1,
+    "switches": {"pipeline": true, "coalescing": true}
+  },
+  {
+    "name": "operator-incremental",
+    "devices": ["cpu", "cpu"],
+    "interface": "async",
+    "max_inflight": 8,
+    "query_every": 1,
+    "switches": {"pipeline": true, "coalescing": true, "operator_incremental": true},
+    "reference": "operator-recompute"
+  },
+  {
+    "name": "pipeline-off",
+    "devices": ["cpu", "cpu"],
+    "interface": "async",
+    "max_inflight": 8,
+    "query_every": 1,
+    "switches": {"coalescing": true, "operator_incremental": true}
+  },
+  {
+    "name": "pipeline-on",
+    "devices": ["cpu", "cpu"],
+    "interface": "async",
+    "max_inflight": 8,
+    "query_every": 1,
+    "switches": {"pipeline": true, "coalescing": true, "operator_incremental": true},
+    "reference": "pipeline-off"
+  },
+  {
+    "name": "aggregates-not-retained",
+    "devices": ["cpu", "cpu"],
+    "interface": "async",
+    "max_inflight": 8,
+    "query_every": 1,
+    "switches": {"pipeline": true, "coalescing": true}
+  },
+  {
+    "name": "aggregates-retained",
+    "devices": ["cpu", "cpu"],
+    "interface": "async",
+    "max_inflight": 8,
+    "query_every": 1,
+    "switches": {
+      "pipeline": true,
+      "coalescing": true,
+      "retain_aggregates": true
+    },
+    "reference": "aggregates-not-retained"
+  },
+  {
+    "name": "sparse-aggregate-off",
+    "devices": ["cpu", "cpu"],
+    "interface": "async",
+    "max_inflight": 8,
+    "query_every": 1,
+    "switches": {"pipeline": true, "coalescing": true, "retain_aggregates": true},
+    "delta_max_steps": 32
+  },
+  {
+    "name": "sparse-aggregate-on",
+    "devices": ["cpu", "cpu"],
+    "interface": "async",
+    "max_inflight": 8,
+    "query_every": 1,
+    "switches": {
+      "pipeline": true,
+      "coalescing": true,
+      "retain_aggregates": true,
+      "incremental_aggregates": true
+    },
+    "delta_max_steps": 32,
+    "reference": "sparse-aggregate-off"
+  },
+  {
+    "name": "row-refresh-off",
+    "devices": ["cpu", "cpu"],
+    "interface": "async",
+    "max_inflight": 8,
+    "query_every": 1,
+    "switches": {
+      "pipeline": true,
+      "coalescing": true,
+      "retain_aggregates": true,
+      "incremental_aggregates": true
+    },
+    "delta_max_steps": 32
+  },
+  {
+    "name": "row-refresh-on",
+    "devices": ["cpu", "cpu"],
+    "interface": "async",
+    "max_inflight": 8,
+    "query_every": 1,
+    "switches": {
+      "pipeline": true,
+      "coalescing": true,
+      "retain_aggregates": true,
+      "incremental_aggregates": true,
+      "row_refresh": true
+    },
+    "delta_max_steps": 32,
+    "reference": "row-refresh-off"
+  },
+  {
+    "name": "refresh-every-8",
+    "devices": ["cpu", "cpu"],
+    "interface": "async",
+    "max_inflight": 8,
+    "query_every": 1,
+    "switches": {
+      "pipeline": true,
+      "coalescing": true,
+      "retain_aggregates": true,
+      "incremental_aggregates": true
+    },
+    "delta_max_steps": 8
+  },
+  {
+    "name": "refresh-every-32",
+    "devices": ["cpu", "cpu"],
+    "interface": "async",
+    "max_inflight": 8,
+    "query_every": 1,
+    "switches": {
+      "pipeline": true,
+      "coalescing": true,
+      "retain_aggregates": true,
+      "incremental_aggregates": true
+    },
+    "delta_max_steps": 32,
+    "reference": "refresh-every-8"
+  },
+  {
+    "name": "dispatch-round-robin",
+    "devices": ["cpu", "cpu"],
+    "interface": "async",
+    "max_inflight": 8,
+    "query_every": 1,
+    "dispatch_mode": "round_robin",
+    "switches": {"pipeline": true, "coalescing": true, "operator_incremental": true}
+  },
+  {
+    "name": "dispatch-locality-load",
+    "devices": ["cpu", "cpu"],
+    "interface": "async",
+    "max_inflight": 8,
+    "query_every": 1,
+    "dispatch_mode": "locality_load",
+    "switches": {"pipeline": true, "coalescing": true, "operator_incremental": true},
+    "reference": "dispatch-round-robin"
+  },
+  {
+    "name": "deferred-disabled",
+    "devices": ["cpu", "cpu"],
+    "interface": "async",
+    "max_inflight": 8,
+    "query_every": 1,
+    "deferred_mode": "disabled",
+    "max_stale_versions": 0,
+    "switches": {"pipeline": true, "coalescing": true, "operator_incremental": true}
+  },
+  {
+    "name": "deferred-fixed-time",
+    "devices": ["cpu", "cpu"],
+    "interface": "async",
+    "max_inflight": 8,
+    "query_every": 1,
+    "deferred_mode": "fixed_time",
+    "deferred_window_seconds": 0.05,
+    "max_stale_versions": 0,
+    "switches": {
+      "pipeline": true,
+      "coalescing": true,
+      "operator_incremental": true,
+      "bounded_staleness": true
+    },
+    "reference": "deferred-disabled"
+  },
+  {
+    "name": "deferred-hotspot",
+    "devices": ["cpu", "cpu"],
+    "interface": "async",
+    "max_inflight": 8,
+    "query_every": 1,
+    "deferred_mode": "hotspot",
+    "deferred_window_seconds": 0.05,
+    "hotspot_degree_threshold": 8,
+    "hotspot_max_changes": 4,
+    "max_stale_versions": 0,
+    "switches": {
+      "pipeline": true,
+      "coalescing": true,
+      "operator_incremental": true,
+      "bounded_staleness": true
+    },
+    "reference": "deferred-fixed-time"
+  },
+  {
+    "name": "admission-cap-1",
+    "devices": ["cpu", "cpu"],
+    "interface": "async",
+    "max_inflight": 1,
+    "query_every": 1,
+    "switches": {"pipeline": true, "coalescing": true, "operator_incremental": true}
+  },
+  {
+    "name": "admission-cap-8",
+    "devices": ["cpu", "cpu"],
+    "interface": "async",
+    "max_inflight": 8,
+    "query_every": 1,
+    "switches": {"pipeline": true, "coalescing": true, "operator_incremental": true},
+    "reference": "admission-cap-1"
+  },
+  {
+    "name": "compute-serial",
+    "devices": ["cpu", "cpu"],
+    "interface": "async",
+    "max_inflight": 8,
+    "query_every": 1,
+    "switches": {"pipeline": true, "coalescing": true, "operator_incremental": true}
+  },
+  {
+    "name": "compute-concurrent",
+    "devices": ["cpu", "cpu"],
+    "interface": "async",
+    "max_inflight": 8,
+    "query_every": 1,
+    "switches": {
+      "pipeline": true,
+      "coalescing": true,
+      "operator_incremental": true,
+      "concurrent_compute": true
+    },
+    "reference": "compute-serial"
+  },
+  {
+    "name": "interaction-pipeline-locality-fixed",
+    "devices": ["cpu", "cpu"],
+    "interface": "async",
+    "max_inflight": 8,
+    "query_every": 1,
+    "dispatch_mode": "locality_load",
+    "deferred_mode": "fixed_time",
+    "deferred_window_seconds": 0.05,
+    "max_stale_versions": 0,
+    "switches": {
+      "pipeline": true,
+      "coalescing": true,
+      "operator_incremental": true,
+      "bounded_staleness": true
+    }
+  }
+]

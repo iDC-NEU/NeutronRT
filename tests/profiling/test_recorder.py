@@ -92,6 +92,18 @@ def test_memory_sampling_keeps_only_start_peak_and_end_and_joins_its_thread():
 	assert not sampler._thread.is_alive()
 
 
+def test_memory_sampling_reports_read_errors_without_leaking_or_raising_from_stop():
+	def read():
+		raise OSError("rss unavailable")
+
+	sampler = MemorySampler(interval=0.001, read=read)
+	sampler.start()
+	report = sampler.stop(timeout=1)
+	assert report["sampling_errors"] >= 2
+	assert "rss unavailable" in report["last_sampling_error"]
+	assert report["sampler_stopped"]
+
+
 def test_counter_and_timing_with_the_same_name_still_respect_the_series_limit():
 	recorder = Recorder(max_series=1)
 	recorder.start()

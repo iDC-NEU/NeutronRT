@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "classification": "User-defined experiment tiers; no node or edge subsampling",
+  "datasets": [
+    {"name": "arxiv", "tier": "small", "format": "ogb-csv", "path": "/mnt/nfs0/lvhr/neutronrt-evaluation-data/arxiv/raw", "features": "real", "labels": true},
+    {"name": "products", "tier": "small", "format": "ogb-csv", "path": "/mnt/nfs0/lvhr/neutronrt-evaluation-data/products/raw", "features": "real", "labels": true, "add_inverse_edges": true},
+    {"name": "reddit", "tier": "small", "format": "reddit-dgl", "path": "/mnt/nfs0/lvhr/neutronrt-evaluation-data/revision-datasets-proxy/reddit", "features": "real", "labels": true},
+    {"name": "papers100m", "tier": "large", "format": "ogb-papers", "path": "/mnt/nfs0/lvhr/neutronrt-evaluation-data/revision-datasets-proxy/ogbn_papers100M", "archive": "/mnt/nfs0/lvhr/neutronrt-evaluation-data/revision-datasets-proxy/papers100M-bin.zip", "features": "real", "labels": true, "download_task_id": "06a9a451de5f"},
+    {"name": "twitter", "tier": "large", "format": "prepared", "path": "/mnt/nfs0/lvhr/neutronrt-evaluation-data/twitter-2010-review/prepared", "features": "synthetic-normal", "labels": false},
+    {"name": "friendster", "tier": "large", "format": "prepared", "path": "/mnt/nfs0/lvhr/neutronrt-evaluation-data/revision-datasets-proxy/friendster/prepared", "features": "synthetic-normal", "labels": false}
+  ]
+}

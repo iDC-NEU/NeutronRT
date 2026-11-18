@@ -1,0 +1,7 @@
+{
+  "id": "persistent-topology-five-datasets-v1",
+  "hardware_profile": "prepare-topology",
+  "wall_seconds": 14400,
+  "environment": {"CUDA_VISIBLE_DEVICES": "", "OMP_NUM_THREADS": "8", "MKL_NUM_THREADS": "8", "OPENBLAS_NUM_THREADS": "8"},
+  "command": ["{python}", "-m", "scripts.prepare_topology", "--registry", "config/experiments/datasets.json", "--output", "{output}/topologies", "--dataset", "arxiv", "--dataset", "products", "--dataset", "reddit", "--dataset", "twitter", "--dataset", "friendster", "--threads", "8"]
+}

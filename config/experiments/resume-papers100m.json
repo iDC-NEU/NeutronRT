@@ -1,0 +1,12 @@
+{
+  "id": "papers100m-resume-preserved-blocks-v1",
+  "hardware_profile": "download",
+  "wall_seconds": 46800,
+  "required_files": [
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/revision-datasets-proxy/papers100M-bin.zip.part",
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/revision-datasets-proxy/papers100M-bin.zip.part.aria2",
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/revision-datasets-proxy/papers100M-bin.zip.part.json"
+  ],
+  "environment": {"CUDA_VISIBLE_DEVICES": ""},
+  "command": ["{python}", "-m", "scripts.neubox.download", "http://snap.stanford.edu/ogb/data/nodeproppred/papers100M-bin.zip", "/mnt/nfs0/lvhr/neutronrt-evaluation-data/revision-datasets-proxy/papers100M-bin.zip", "--connections", "8", "--proxy", "http://127.0.0.1:7890", "--attempts", "3", "--seconds", "43200"]
+}

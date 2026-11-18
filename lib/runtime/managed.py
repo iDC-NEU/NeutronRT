@@ -20,6 +20,7 @@ from lib.models.spec import ModelSpec
 from lib.runtime.config import RuntimeFeatures
 from lib.runtime.data_plane import RemoteEmbeddingPlane
 from lib.runtime.launch import Placement, WorkerSettings, join_world, resolve_devices, run_worker
+from lib.runtime.policies import DeferredPolicyConfig, DispatchPolicy
 from lib.runtime.transport import OwnedTransport, RemoteEndpoint
 from lib.storage.capacity import GIB, StorageNodeBudget
 
@@ -55,6 +56,7 @@ class ManagedRuntime:
 		idle_flush_seconds: float = 0.005,
 		storage_partitions: int = 1,
 		storage_directory: Optional[str] = None,
+		storage_exported_base: Optional[str] = None,
 		storage_overlay_bytes: int = 256 * 1024**2,
 		storage_response_bytes: int = 256 * 1024**2,
 		storage_node_names: Optional[Sequence[str]] = None,
@@ -67,6 +69,14 @@ class ManagedRuntime:
 		placement: Optional[Placement] = None,
 		worker_threads: Optional[int] = None,
 		history_bytes: Optional[int] = None,
+		worker_feature_cache_bytes: int = 0,
+		dispatch_mode: str = "round_robin",
+		dispatch_locality_weight: float = 1.0,
+		dispatch_load_weight: float = 1.0,
+		deferred_mode: str = "version_window",
+		deferred_window_seconds: Optional[float] = None,
+		hotspot_degree_threshold: Optional[int] = None,
+		hotspot_max_changes: Optional[int] = None,
 		backend: str = "auto",
 		rendezvous_prefix: Optional[str] = None,
 		**service_options,
@@ -80,6 +90,8 @@ class ManagedRuntime:
 			or storage_node_reserve_bytes >= storage_node_capacity_bytes
 			or timeout <= 0
 			or max_retries < 0
+			or type(worker_feature_cache_bytes) is not int
+			or worker_feature_cache_bytes < 0
 		):
 			raise ValueError("Invalid managed worker devices, budgets, timeout, or retry limit")
 		switches = switches or RuntimeFeatures()
@@ -105,7 +117,33 @@ class ManagedRuntime:
 				"operator_incremental",
 				"pma_storage",
 				"mapped_host_reads",
+				"worker_feature_cache",
 			}
+		)
+		if worker_feature_cache_bytes and not switches.worker_feature_cache:
+			raise ValueError("worker_feature_cache_bytes requires worker_feature_cache=true")
+		if switches.worker_feature_cache and worker_feature_cache_bytes < 1:
+			raise ValueError("worker_feature_cache=true requires a positive byte budget")
+		if switches.worker_feature_cache:
+			raise NotImplementedError(
+				"worker_feature_cache is fail-closed: the current wire protocol sends complete feature rows "
+				"before lookup; miss-only version/generation-certified transport is not implemented"
+			)
+		deferred_policy = DeferredPolicyConfig(
+			mode=deferred_mode,
+			window_seconds=deferred_window_seconds,
+			hotspot_degree_threshold=hotspot_degree_threshold,
+			hotspot_max_changes=hotspot_max_changes,
+		)
+		if not switches.bounded_staleness and deferred_policy.mode != "version_window":
+			raise ValueError("Non-default deferred policies require bounded_staleness=true")
+		dispatch_policy = service_options.pop(
+			"dispatch_policy",
+			DispatchPolicy(
+				dispatch_mode,
+				locality_weight=dispatch_locality_weight,
+				load_weight=dispatch_load_weight,
+			),
 		)
 		if switches.aggregate_only and not switches.retain_aggregates:
 			raise ValueError("Aggregate-only storage requires retain_aggregates=true")
@@ -181,6 +219,7 @@ class ManagedRuntime:
 			profile_dir=profile_dir,
 			history_bytes=256 * 1024**2 if history_bytes is None else history_bytes,
 			refresh_steps=delta_max_steps,
+			feature_cache_bytes=worker_feature_cache_bytes,
 			rendezvous_prefix=rendezvous_prefix,
 		)
 		self.model = model
@@ -224,6 +263,7 @@ class ManagedRuntime:
 					storage_budgets=self.storage_budgets,
 					storage_endpoints=tuple(storage_endpoints) if storage_endpoints is not None else None,
 					storage_authkey=storage_authkey,
+					exported_base=storage_exported_base,
 				)
 				graph = cast(DGLGraph, self.topology)
 				service_options["frontier_expander"] = self.topology.expand
@@ -244,6 +284,8 @@ class ManagedRuntime:
 			service_options.setdefault("source_degree_sensitive", model.name == "gcn")
 			service_options["pipeline"] = switches.pipeline
 			service_options["preemption_enabled"] = switches.preemption
+			service_options["dispatch_policy"] = dispatch_policy
+			service_options["worker_feature_cache_bytes"] = worker_feature_cache_bytes
 			self.service = ResilientEmbeddingService(
 				graph,
 				features,
@@ -265,7 +307,12 @@ class ManagedRuntime:
 			if switches.bounded_staleness:
 				from lib.graph.deferred import DeferredUpdates
 
-				DeferredUpdates(self.service, max_versions=max_stale_versions, idle_seconds=idle_flush_seconds)
+				DeferredUpdates(
+					self.service,
+					max_versions=max_stale_versions,
+					idle_seconds=idle_flush_seconds,
+					policy=deferred_policy,
+				)
 		except BaseException:
 			self._abort_world()
 			if self.plane is not None:

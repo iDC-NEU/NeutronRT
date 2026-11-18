@@ -1,0 +1,6 @@
+{
+  "after_tasks": ["43927648f43b", "7418bef7ad40", "bade4642e8e1"],
+  "manifest": "config/experiments/prepare-six-datasets.json",
+  "output": "/mnt/nfs0/lvhr/neutronrt-results/preparation/six-datasets-20261116-v1",
+  "hardware": "config/experiments/hardware.json"
+}

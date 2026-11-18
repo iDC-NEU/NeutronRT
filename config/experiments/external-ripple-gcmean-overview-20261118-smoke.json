@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "cohort_kind": "smoke",
+  "id": "external-ripple-gcmean-overview-20261118-smoke-v1",
+  "artifact": "ripple",
+  "display_name": "SMOKE: Ripple author incremental GC-mean",
+  "processor": "incremental",
+  "source_checkout": "/tmp/neutronrt-paper-ripple",
+  "python_executable": "/home/hdd/lvhr/miniconda/envs/graph/bin/python",
+  "hardware_profile": "external-cpu",
+  "trial_timeout_seconds": 3300,
+  "checkpoint": "/mnt/nfs0/lvhr/neutronrt-evaluation-data/checkpoints/sage-arxiv.pt",
+  "workload_contract": {
+    "update_requests": 20,
+    "updates": {
+      "features": {"requests": 7, "changes_per_request": 128},
+      "insert": {"requests": 7, "changes_per_request": 128},
+      "delete": {"requests": 6, "changes_per_request": 128}
+    },
+    "query_requests": 20,
+    "query_rows": 1280
+  },
+  "algorithm_scope": "Smoke only; not a result. Pinned author incremental processor, w3_gcn_mean / GC-mean, explicit zero-self compatibility model; same fresh arXiv trace r0.",
+  "trials": [
+    {"id": "arxiv-r0-smoke", "dataset": "arxiv", "repetition": 0, "trace_seed": 71, "trace_digest": "b7b2ae928832073638c1f81d953facc7e0a5f77b78fb2f0e5710b7ef34c3a897", "workload": "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/arxiv-NrtInc-r0/report/sage-NrtInc-0-workload.pt", "graph": "/mnt/nfs0/lvhr/neutronrt-evaluation-data/arxiv/raw"}
+  ]
+}

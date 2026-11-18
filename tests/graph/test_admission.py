@@ -158,3 +158,66 @@ def test_errors_propagate_and_capacity_is_released():
 	finally:
 		admission.close()
 		plane.close()
+
+
+def test_admission_profile_records_monotonic_lifecycle_and_versions():
+	service, plane, _, _ = _setup("sage")
+	admission = UpdateAdmission(service)
+	try:
+		ticket = admission.submit(UpdateKind.INSERT, torch.tensor([2]), torch.tensor([0]))
+		result = ticket.result(timeout=10)
+		profile = admission.profile(ticket.sequence)
+		assert profile is not None
+		assert profile["state"] == "published"
+		assert profile["input_version"] == result.input_version
+		assert profile["publication_version"] == result.version
+		assert profile["admitted_at_ns"] <= profile["execution_started_at_ns"]
+		assert profile["execution_started_at_ns"] <= profile["publication_observed_at_ns"]
+		assert profile["publication_observed_at_ns"] <= profile["completion_at_ns"]
+		assert profile["queue_wait_ns"] >= 0
+		assert profile["execution_ns"] >= 0
+		assert profile["delayed_publication_wait_ns"] == 0
+		assert profile["server_reply_prepared_at_ns"] is None
+		assert profile["clock_scope"].startswith("server perf_counter_ns")
+		observed = admission.profile(ticket.sequence, observed_at_ns=profile["completion_at_ns"] + 1)
+		assert observed["server_reply_prepared_at_ns"] == profile["completion_at_ns"] + 1
+	finally:
+		admission.close()
+		plane.close()
+
+
+def test_deferred_admission_separates_execution_from_publication_wait():
+	service, plane, _, _ = _setup("sage")
+	from lib.graph.deferred import DeferredUpdates
+
+	deferred = DeferredUpdates(service, max_versions=2, idle_seconds=60)
+	admission = UpdateAdmission(service)
+	try:
+		entered_submit, release_submit = Event(), Event()
+		original_submit = deferred.submit
+
+		def gated_submit(*args, **kwargs):
+			publication = original_submit(*args, **kwargs)
+			entered_submit.set()
+			assert release_submit.wait(10)
+			return publication
+
+		deferred.submit = gated_submit
+		ticket = admission.submit(UpdateKind.FEATURES, torch.tensor([1]), service.features[[1]] + 1)
+		assert ticket.telemetry is not None
+		assert entered_submit.wait(10)
+		queued = admission.profile(ticket.sequence)
+		assert queued["state"] == "executing"
+		release_submit.set()
+		deferred.flush()
+		result = ticket.result(timeout=10)
+		profile = admission.profile(ticket.sequence)
+		assert profile["publication_version"] == result.version
+		assert profile["staged_at_ns"] is not None
+		assert profile["delayed_publication_wait_ns"] >= 0
+		assert profile["execution_ns"] >= 0
+		assert profile["publication_source"] == "deferred_future_callback"
+	finally:
+		admission.close()
+		deferred.close()
+		plane.close()

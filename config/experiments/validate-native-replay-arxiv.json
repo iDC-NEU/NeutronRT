@@ -1,0 +1,14 @@
+{
+  "id": "dedicated-native-arxiv-real-trace-integration-v1",
+  "purpose": "Real-trace CPU integration only; not a CPU/GPU speedup comparison",
+  "hardware_profile": "arxiv-cpu",
+  "wall_seconds": 6000,
+  "required_files": [
+    "/mnt/nfs0/lvhr/neutronrt-results/preparation/topology-five-20261116-v1/topologies/arxiv/graph.bin",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261116-v2/cohort/arxiv-NrtInc-r0/report/sage-NrtInc-0-workload.pt",
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/checkpoints/sage-arxiv.pt",
+    "config/experiments/validate-native-replay-arxiv-trials.json"
+  ],
+  "environment": {"CUDA_VISIBLE_DEVICES": "", "OMP_NUM_THREADS": "4", "MKL_NUM_THREADS": "4", "OPENBLAS_NUM_THREADS": "4"},
+  "command": ["{python}", "-m", "scripts.evaluate.cohort", "config/experiments/validate-native-replay-arxiv-trials.json", "--output", "{output}/cohort"]
+}

@@ -1,0 +1,17 @@
+{
+  "id": "dedicated-dgl-baseline-gpu-smoke-v1",
+  "purpose": "GPU numerical integration smoke only; not planned performance results",
+  "hardware_profile": "peer-gpu",
+  "wall_seconds": 300,
+  "environment": {
+    "NEUTRONRT_BASELINE_TEST_DEVICE": "cuda:0",
+    "OMP_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1"
+  },
+  "command": [
+    "{python}", "-m", "pytest",
+    "tests/validate/test_dgl_baselines.py",
+    "-q", "--tb=short"
+  ]
+}

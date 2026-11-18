@@ -1,0 +1,22 @@
+{
+  "id": "transport-integration-validation-v1",
+  "hardware_profile": "peer-cpu",
+  "wall_seconds": 300,
+  "environment": {
+    "CUDA_VISIBLE_DEVICES": "",
+    "OMP_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1"
+  },
+  "command": [
+    "{python}",
+    "-m",
+    "pytest",
+    "tests/storage/test_remote.py",
+    "tests/storage/test_remote_validation.py",
+    "tests/storage/test_topology.py",
+    "tests/peer/",
+    "tests/evaluate/test_distributed.py",
+    "-q"
+  ]
+}

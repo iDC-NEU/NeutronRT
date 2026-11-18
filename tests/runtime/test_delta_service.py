@@ -77,6 +77,14 @@ def test_missing_history_and_small_budget_fall_back_to_full_recomputation(reason
 		service.change_features(torch.tensor([0]), torch.ones(1, 4))
 		_check(service, model)
 		assert service.counters.delta_fallback_tasks > 0
+		labels = service.profile()["fallback_reasons"]["layers"]
+		expected = {
+			"cold": "missing_aggregate_anchor",
+			"budget": "cold_or_unavailable_state",
+			"old-h": "missing_previous_embedding",
+			"old-sum": "missing_aggregate_anchor",
+		}[reason]
+		assert any(expected in values for values in labels.values())
 		if reason == "old-h":
 			assert service.counters.delta_tasks > 0
 

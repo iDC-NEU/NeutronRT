@@ -121,7 +121,7 @@ def verify(checkout: Path, output: Path, *, seed: int = 71) -> dict[str, Any]:
 			],
 		),
 		("restore-in-degree", [event(5, operations.EDGE_ADD, source_id=5, target_id=6)]),
-		("empty", []),
+		("noop", []),
 	]
 	fixture_hash = hashlib.sha256()
 	for path in sorted([*data.glob("*"), *state.glob("*")]):
@@ -161,6 +161,18 @@ def verify(checkout: Path, output: Path, *, seed: int = 71) -> dict[str, Any]:
 		"adaptations": ["Config.model_root and Config.embs_root redirect generated fixtures to the output directory"],
 		"scope": "synthetic numerical verification only; no performance measurement",
 		"workload": "authors GC-mean; directed simple graph; no self loops",
+		"operator": {
+			"name": "CustomGraphConvMean",
+			"math": "author GC-mean",
+			"compatible_with_neutronrt_graphsage_mean": False,
+		},
+		"replay": {
+			"stateful_successive_batches": True,
+			"checked_every_row_after_each_batch": True,
+			"batches": [label for label, _ in batches],
+			"performance_replay": False,
+			"timing_available": False,
+		},
 		"model": {"features": features, "hidden": hidden, "classes": classes, "layers": layers},
 		"seed": seed,
 		"fixture_sha256": fixture_hash.hexdigest(),

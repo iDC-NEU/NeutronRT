@@ -27,7 +27,7 @@ if _version_not_supported:
 	)
 
 
-class OwnedInferenceStub(object):
+class OwnedInferenceStub:
 	"""Sync and Async admit the same update. Sync waits for ready publication;
 	storage writeback may finish later. A caller timeout never cancels admission.
 	"""
@@ -76,7 +76,7 @@ class OwnedInferenceStub(object):
 		)
 
 
-class OwnedInferenceServicer(object):
+class OwnedInferenceServicer:
 	"""Sync and Async admit the same update. Sync waits for ready publication;
 	storage writeback may finish later. A caller timeout never cancels admission.
 	"""
@@ -157,7 +157,7 @@ def add_OwnedInferenceServicer_to_server(servicer, server):
 
 
 # This class is part of an EXPERIMENTAL API.
-class OwnedInference(object):
+class OwnedInference:
 	"""Sync and Async admit the same update. Sync waits for ready publication;
 	storage writeback may finish later. A caller timeout never cancels admission.
 	"""

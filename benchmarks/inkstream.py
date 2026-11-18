@@ -40,6 +40,20 @@ def _observe_outputs(processor, pre, post):
 	processor.model_config[-1][-1] = observe_final
 
 
+def _assert_simple_graph(edges):
+	pairs = [tuple(pair) for pair in edges.T.tolist()]
+	if len(pairs) != len(set(pairs)):
+		raise ValueError("InkStream verification supports simple graphs only; multiedges are rejected")
+
+
+def _failure_boundary(pre_error: float, output_error: float, *, tolerance: float = 1e-6) -> str:
+	if output_error > tolerance and pre_error <= tolerance:
+		return "final_output_stage"
+	if pre_error > tolerance:
+		return "pre_final_or_hidden"
+	return "none"
+
+
 def verify(checkout: Path, output: Path, *, seed: int = 71) -> dict[str, Any]:
 	"""Compare all rows with the authors' own full model after four edge batches.
 
@@ -78,6 +92,7 @@ def verify(checkout: Path, output: Path, *, seed: int = 71) -> dict[str, Any]:
 	count, features, hidden, classes = 16, 4, 8, 3
 	nodes = torch.arange(count)
 	edges = torch.stack((nodes.repeat(2), torch.cat(((nodes + 1) % count, (nodes + 3) % count))))
+	_assert_simple_graph(edges)
 	x = torch.randn(count, features) * 0.1
 	model = model_module.SAGE(features, hidden, classes, SimpleNamespace(save_int=True, aggr="mean")).eval()
 	with torch.inference_mode():
@@ -143,6 +158,9 @@ def verify(checkout: Path, output: Path, *, seed: int = 71) -> dict[str, Any]:
 				"max_output_error": float((post - expected).abs().max()),
 				"max_pre_final_activation_error": float((pre - expected).abs().max()),
 				"max_hidden_error": hidden_error,
+				"failure_boundary": _failure_boundary(
+					float((pre - expected).abs().max()), float((post - expected).abs().max())
+				),
 				"valid": bool(torch.allclose(post, expected, atol=1e-6, rtol=1e-5)),
 			}
 		)
@@ -155,6 +173,20 @@ def verify(checkout: Path, output: Path, *, seed: int = 71) -> dict[str, Any]:
 		"unmodified_algorithm": True,
 		"implementation_hashes": hashes,
 		"scope": "synthetic numerical verification; adapted dependencies; not authors Docker reproduction or timing",
+		"operator": {
+			"name": "author SAGE",
+			"aggregation": "mean",
+			"supported_aggregations": ["mean"],
+			"exact_math": "author mean GraphSAGE path",
+		},
+		"replay": {
+			"stateful_successive_batches": False,
+			"state_reset_boundary": "each batch reconstructs processor inputs from the initial model state",
+			"performance_replay": False,
+			"timing_available": False,
+		},
+		"artifact_gate": "unchanged_author_source_and_dependency",
+		"diagnostic_patch": None,
 		"adaptations": [
 			"Generated in-memory adjacency/intermediate fixtures",
 			"Observers capture discarded outputs",

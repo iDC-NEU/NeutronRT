@@ -59,4 +59,7 @@ warn_return_any = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 norecursedirs = [".*", "build", "*.egg", "__pycache__", "venv"]
-markers = ["host: requires real sockets, process groups, or managed worker processes"]
+markers = [
+	"host: requires real sockets, process groups, or managed worker processes",
+	"gpu: requires CUDA and must be explicitly enabled through neu-sbox",
+]

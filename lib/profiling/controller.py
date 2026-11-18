@@ -11,6 +11,13 @@ from lib.graph.methods import method_from_switches
 from lib.graph.serving import UpdateResult
 from lib.profiling.communication import ProfiledCommManager
 from lib.profiling.control import start_workers, stop_workers
+from lib.profiling.instrumentation import (
+	counter_delta,
+	counter_snapshot,
+	grouped_counter_delta,
+	profile_snapshot,
+	profile_window,
+)
 from lib.profiling.network import NetworkSnapshot
 from lib.profiling.network import delta as network_delta
 from lib.profiling.network import snapshot as network_snapshot
@@ -41,7 +48,13 @@ class RuntimeProfiler:
 	be blindly added. A worker-world reset invalidates normal-throughput comparison.
 	"""
 
-	def __init__(self, runtime: "ManagedRuntime", *, network_interfaces: Optional[List[str]] = None) -> None:
+	def __init__(
+		self,
+		runtime: "ManagedRuntime",
+		*,
+		network_interfaces: Optional[List[str]] = None,
+		admission=None,
+	) -> None:
 		if not runtime.switches.profiling or not isinstance(runtime.comm, ProfiledCommManager) or runtime.plane is None:
 			raise ValueError("Runtime profiling must be enabled before starting the worker world")
 		self.runtime = runtime
@@ -57,8 +70,19 @@ class RuntimeProfiler:
 		self._network_interfaces = tuple(network_interfaces) if network_interfaces is not None else None
 		self._network_before: Optional[NetworkSnapshot] = None
 		self._reset_count = 0
+		self.admission = admission
+		self._admission_before: Optional[dict] = None
+		self._policy_before: Optional[dict] = None
 		self._first_update = self._last_update = 0
 		self._install()
+
+	def attach_admission(self, admission) -> None:
+		"""Attach an optional UpdateAdmission observer before the next window."""
+		if self.recorder.active:
+			raise RuntimeError("Cannot attach admission while a profile window is active")
+		if admission is not None and getattr(admission, "service", None) is not self.runtime.service:
+			raise ValueError("Admission belongs to another embedding service")
+		self.admission = admission
 
 	def _wrap(self, target, name: str, phase: str, *, update: bool = False, generator: bool = False) -> None:
 		original: Callable[..., Any] = getattr(target, name)
@@ -159,7 +183,13 @@ class RuntimeProfiler:
 			if trace and self.runtime.profile_dir is None:
 				raise ValueError("Trace capture requires a profile directory")
 			self._first_update = self._last_update = 0
-			self._before = dict(vars(service.counters))
+			self._before = counter_snapshot(service.counters)
+			self._policy_before = (
+				profile_snapshot(service.profile()) if callable(getattr(service, "profile", None)) else None
+			)
+			self._admission_before = self.admission.profile_state() if self.admission is not None else None
+			if self._admission_before is not None and self._admission_before["pending"]:
+				raise RuntimeError("Finish pending admission work before starting a measurement window")
 			self._reset_count = self.runtime.reset_count
 			start_workers(self.transport, trace=trace, trace_task_limit=trace_task_limit)
 			self._storage_before, self._storage_samplers = start_storage(getattr(self.runtime, "topology", None))
@@ -177,11 +207,16 @@ class RuntimeProfiler:
 		service = self.runtime.service
 		pending = service.deferred.pending if service.deferred is not None else 0
 		incomplete = service._pending_update is not None
-		return {
+		result = {
 			"pending_deferred_updates": pending,
 			"update_incomplete": incomplete,
 			"service_drained": pending == 0 and not incomplete,
 		}
+		if self.admission is not None:
+			state = self.admission.profile_state()
+			result["admission"] = state
+			result["admission_drained"] = state["pending"] == 0
+		return result
 
 	def stop(self) -> dict:
 		service = self.runtime.service
@@ -202,14 +237,34 @@ class RuntimeProfiler:
 				getattr(self.runtime, "topology", None), self._storage_before, self._storage_samplers
 			)
 			self._storage_before, self._storage_samplers = None, {}
-			after = vars(service.counters)
-			delta = {name: after[name] - value for name, value in self._before.items()}
+			after = counter_snapshot(service.counters)
+			policy_after = profile_snapshot(service.profile()) if callable(getattr(service, "profile", None)) else None
+			policy_window = (
+				profile_window(self._policy_before, policy_after)
+				if self._policy_before is not None and isinstance(policy_after, dict)
+				else None
+			)
+			delta, counter_resets = counter_delta(self._before, after)
 			engine_window = (self._last_update - self._first_update) / 1e9 if self._first_update else 0.0
-			busy_seconds = delta["update_seconds"] + delta["staging_seconds"]
+			busy_seconds = delta.get("update_seconds", 0) + delta.get("staging_seconds", 0)
 			all_reports = [root, *workers]
 			sent, received = payload_total(all_reports, "send"), payload_total(all_reports, "recv")
+			admission_drained = publication.get("admission_drained", True)
+			storage_sampling_complete = storage is None or storage.get("sampling_complete", True)
+			admission_window = None
+			if self._admission_before is not None and self.admission is not None:
+				current_admission = self.admission.profile_state()
+				admission_window = {
+					name: current_admission[name] - self._admission_before[name]
+					for name in ("admitted", "completed", "failed")
+				}
+				admission_window["pending_at_stop"] = current_admission["pending"]
 			valid = (
 				publication["service_drained"]
+				and admission_drained
+				and (admission_window is None or admission_window["failed"] == 0)
+				and storage_sampling_complete
+				and (policy_window is None or not policy_window["counter_resets"])
 				and not reset
 				and sent == received
 				and all(report["open_spans"] == 0 and report["series_dropped"] == 0 for report in all_reports)
@@ -226,6 +281,15 @@ class RuntimeProfiler:
 				},
 				"valid": valid,
 				"publication": publication,
+				"admission_window": admission_window,
+				"policy_window": policy_window,
+				"instrumentation": {
+					"counter_source": "EmbeddingService.counters",
+					"counter_deltas": delta,
+					"counter_resets": counter_resets,
+					"groups": grouped_counter_delta(delta),
+					"reset_semantics": "A counter that decreased is reported as zero and named in counter_resets.",
+				},
 				"worker_world_reset": reset,
 				"traffic_balanced": sent == received,
 				"trace_pass": any(report["trace_path"] for report in all_reports),
@@ -245,6 +309,7 @@ class RuntimeProfiler:
 				"engine": {
 					**delta,
 					"completion_window_seconds": engine_window,
+					"counter_resets": counter_resets,
 					"completed_changes_per_second": delta["input_changes"] / engine_window if engine_window else None,
 					"busy_changes_per_second": delta["input_changes"] / busy_seconds if busy_seconds else None,
 				},

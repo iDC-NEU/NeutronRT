@@ -19,7 +19,7 @@ from lib.storage.base import BaseTopology
 from lib.storage.capacity import StorageNodeBudget, require_capacity
 from lib.storage.capacity import manifest as capacity_manifest
 from lib.storage.process import LocalStorage
-from lib.storage.remote import RemoteStorage
+from lib.storage.remote import RemoteStorage, base_fingerprint, graph_fingerprint
 
 Result = TypeVar("Result")
 Rows = list[tuple[np.ndarray, np.ndarray, np.ndarray]]
@@ -41,15 +41,30 @@ class ShardedTopology:
 		storage_budgets: Optional[tuple[StorageNodeBudget, ...]] = None,
 		storage_endpoints: Optional[tuple[str, ...]] = None,
 		storage_authkey: str = "neutronrt",
+		exported_base: Optional[str | Path] = None,
 	) -> None:
-		if directory is not None:
+		if storage_endpoints is not None and exported_base is None:
+			raise ValueError(
+				"Remote storage requires a pre-exported persistent base; "
+				"prepare it with BaseTopology.export(graph, folder) and pass exported_base"
+			)
+		if directory is not None and exported_base is None:
 			Path(directory).mkdir(parents=True, exist_ok=True)
-		self._folder = TemporaryDirectory(prefix="neutronrt-topology-", dir=directory)
+		self._folder = None
 		self.response_bytes = response_bytes
 		self.storage: LocalStorage | RemoteStorage
 		started = perf_counter()
 		try:
-			self.base = BaseTopology.export(graph, Path(self._folder.name))
+			if exported_base is None:
+				self._folder = TemporaryDirectory(prefix="neutronrt-topology-", dir=directory)
+				self.base = BaseTopology.export(graph, Path(self._folder.name))
+			else:
+				folder = Path(exported_base).expanduser().resolve()
+				if not folder.is_dir():
+					raise ValueError(f"Pre-exported topology base does not exist: {folder}")
+				self.base = BaseTopology(folder, graph.num_nodes(), graph.num_edges())
+				if base_fingerprint(self.base) != graph_fingerprint(graph):
+					raise ValueError("Pre-exported topology base does not match the graph content")
 			budgets = storage_budgets or tuple(StorageNodeBudget(f"local-{index}") for index in range(partitions))
 			if len(budgets) != partitions:
 				raise ValueError("One storage budget is required per storage partition")
@@ -78,11 +93,13 @@ class ShardedTopology:
 					timeout=timeout,
 				)
 		except BaseException:
-			self._folder.cleanup()
+			if self._folder is not None:
+				self._folder.cleanup()
 			raise
 		self.initialization = {
 			"export_seconds": export_done - started,
 			"actor_startup_seconds": perf_counter() - export_done,
+			"base_fingerprint": base_fingerprint(self.base),
 			"base_file_bytes": sum(
 				path.stat().st_size for direction in ("in", "out") for path in self.base.files(direction)
 			),
@@ -314,7 +331,8 @@ class ShardedTopology:
 
 	def close(self) -> None:
 		self.storage.close()
-		self._folder.cleanup()
+		if self._folder is not None:
+			self._folder.cleanup()
 
 	def __enter__(self):
 		return self

@@ -16,6 +16,7 @@ import torch
 from torch import Tensor
 
 from lib.runtime.config import RuntimeFeatures
+from lib.runtime.policies import DeferredPolicyConfig, DispatchPolicy
 
 
 def source_fingerprint(snapshot: Optional[Path] = None) -> str:
@@ -37,14 +38,17 @@ def source_fingerprint(snapshot: Optional[Path] = None) -> str:
 	return digest.hexdigest()
 
 
-def inference_identity(graph, features, spec, *, model=None) -> str:
+def inference_identity(graph, features, spec, *, model=None, configuration: Optional[Mapping[str, Any]] = None) -> str:
 	"""Hash graph, feature, model and edge-attribute content outside measurement."""
 	digest = hashlib.sha256()
-	configuration = asdict(spec)
+	spec_configuration = asdict(spec)
 	# File locations and initialization seeds do not change already-built weights.
-	configuration.pop("checkpoint")
-	configuration.pop("seed")
-	digest.update(json.dumps([graph.num_nodes(), graph.num_edges(), configuration], sort_keys=True).encode())
+	spec_configuration.pop("checkpoint")
+	spec_configuration.pop("seed")
+	identity_configuration: Any = spec_configuration
+	if configuration is not None:
+		identity_configuration = {"model": spec_configuration, "profile_case": dict(configuration)}
+	digest.update(json.dumps([graph.num_nodes(), graph.num_edges(), identity_configuration], sort_keys=True).encode())
 	model = spec.build() if model is None else model
 	for value in (*graph.adj_tensors("csc")[:2], features, *model.state_dict().values()):
 		for chunk in tensor_byte_chunks(value):
@@ -73,6 +77,14 @@ class ProfileCase:
 	storage_partitions: int = 1
 	delta_max_steps: int = 32
 	delta_anchor_bytes: int = 256 * 1024**2
+	dispatch_mode: str = "round_robin"
+	dispatch_locality_weight: float = 1.0
+	dispatch_load_weight: float = 1.0
+	worker_feature_cache_bytes: int = 0
+	deferred_mode: str = "version_window"
+	deferred_window_seconds: Optional[float] = None
+	hotspot_degree_threshold: Optional[int] = None
+	hotspot_max_changes: Optional[int] = None
 
 	def __post_init__(self) -> None:
 		if (
@@ -131,10 +143,77 @@ class ProfileCase:
 			not self.switches.bounded_staleness or self.query_staleness > self.max_stale_versions
 		):
 			raise ValueError("Query staleness exceeds this case's enabled shared budget")
+		if type(self.worker_feature_cache_bytes) is not int or self.worker_feature_cache_bytes < 0:
+			raise ValueError("Invalid worker feature cache byte budget")
+		if not isinstance(self.dispatch_mode, str):
+			raise ValueError("Dispatch mode must be a string")
+		if any(
+			type(value) not in (int, float) or isinstance(value, bool) or not math.isfinite(value) or value < 0
+			for value in (self.dispatch_locality_weight, self.dispatch_load_weight)
+		):
+			raise ValueError("Dispatch weights must be finite, nonnegative numbers")
+		if not isinstance(self.deferred_mode, str):
+			raise ValueError("Deferred mode must be a string")
+		if self.deferred_window_seconds is not None and (
+			type(self.deferred_window_seconds) not in (int, float)
+			or isinstance(self.deferred_window_seconds, bool)
+			or not math.isfinite(self.deferred_window_seconds)
+			or self.deferred_window_seconds <= 0
+		):
+			raise ValueError("Deferred window must be a positive finite number")
+		for name, value in (
+			("hotspot_degree_threshold", self.hotspot_degree_threshold),
+			("hotspot_max_changes", self.hotspot_max_changes),
+		):
+			if value is not None and (type(value) is not int or value < (0 if name.endswith("threshold") else 1)):
+				raise ValueError(f"Invalid {name}")
+		if self.worker_feature_cache_bytes and not self.switches.worker_feature_cache:
+			raise ValueError("worker_feature_cache_bytes requires worker_feature_cache=true")
+		if self.switches.worker_feature_cache:
+			if self.worker_feature_cache_bytes < 1:
+				raise ValueError("worker_feature_cache=true requires a positive byte budget")
+			raise NotImplementedError("worker_feature_cache is unsupported until a miss-only certified protocol exists")
+		DispatchPolicy(
+			self.dispatch_mode,
+			locality_weight=self.dispatch_locality_weight,
+			load_weight=self.dispatch_load_weight,
+		)
+		deferred_mode = self.deferred_mode.replace("-", "_")
+		deferred = (
+			DeferredPolicyConfig(
+				mode=deferred_mode,
+				window_seconds=self.deferred_window_seconds,
+				hotspot_degree_threshold=self.hotspot_degree_threshold,
+				hotspot_max_changes=self.hotspot_max_changes,
+			)
+			if deferred_mode != "disabled"
+			else None
+		)
+		if deferred_mode == "disabled":
+			if self.switches.bounded_staleness:
+				raise ValueError("deferred_mode=disabled conflicts with bounded_staleness=true")
+			if any(
+				value is not None
+				for value in (
+					self.deferred_window_seconds,
+					self.hotspot_degree_threshold,
+					self.hotspot_max_changes,
+				)
+			):
+				raise ValueError("Disabled deferred mode does not accept policy parameters")
+		elif not self.switches.bounded_staleness and deferred is not None and deferred.mode != "version_window":
+			raise ValueError("Non-default deferred policies require bounded_staleness=true")
 
 	@classmethod
 	def from_dict(cls, value: Mapping[str, object]) -> "ProfileCase":
 		values: dict[str, Any] = dict(value)
+		if "dispatch_policy" in values:
+			alias = values.pop("dispatch_policy")
+			if "dispatch_mode" in values and str(values["dispatch_mode"]).replace("-", "_") != str(alias).replace(
+				"-", "_"
+			):
+				raise ValueError("dispatch_mode and dispatch_policy disagree")
+			values.setdefault("dispatch_mode", alias)
 		if "switches" in values:
 			if not isinstance(values["switches"], dict):
 				raise ValueError("Case switches must be a JSON object")
@@ -153,6 +232,32 @@ class ProfileCase:
 	@property
 	def measured_switches(self) -> RuntimeFeatures:
 		return replace(self.switches, profiling=True)
+
+	@property
+	def effective_deferred_mode(self) -> str:
+		return self.deferred_mode.replace("-", "_") if self.switches.bounded_staleness else "disabled"
+
+	@property
+	def managed_deferred_mode(self) -> str:
+		# ManagedRuntime only accepts active policy modes; bounded_staleness=false
+		# prevents it from constructing a deferred publisher.
+		return self.effective_deferred_mode if self.effective_deferred_mode != "disabled" else "version_window"
+
+	def profile_configuration(self) -> dict[str, Any]:
+		"""Return every policy setting that can alter a measured cohort."""
+		return {
+			"dispatch_mode": self.dispatch_mode.replace("-", "_"),
+			"dispatch_locality_weight": float(self.dispatch_locality_weight),
+			"dispatch_load_weight": float(self.dispatch_load_weight),
+			"worker_feature_cache_bytes": self.worker_feature_cache_bytes,
+			"deferred_mode": self.effective_deferred_mode,
+			"requested_deferred_mode": self.deferred_mode.replace("-", "_"),
+			"deferred_window_seconds": self.deferred_window_seconds,
+			"hotspot_degree_threshold": self.hotspot_degree_threshold,
+			"hotspot_max_changes": self.hotspot_max_changes,
+			"switches": self.switches.as_dict(),
+			"feature_cache_status": "unsupported_miss_only_protocol",
+		}
 
 
 def read_cases(values: Sequence[Mapping[str, object]]) -> Tuple[ProfileCase, ...]:

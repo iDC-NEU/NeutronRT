@@ -11,6 +11,7 @@ from torch import Tensor
 
 from lib.graph.recompute import LayerPlan
 from lib.profiling.communication import ProfiledCommManager
+from lib.profiling.instrumentation import profile_snapshot, profile_window
 from lib.profiling.recorder import MemorySampler
 from lib.runtime.aggregates.delta import DeltaHeader
 from lib.runtime.aggregates.recipe import RecipeHeader
@@ -36,6 +37,7 @@ class ProfiledWorker(OwnedWorker):
 		self._trace_capped = False
 		self._profile_window = 0
 		self._incremental_before: dict[str, int] = {}
+		self._profile_before: Optional[dict] = None
 
 	def _apply(self, task: LayerPlan, inputs: Tensor) -> Tensor:
 		return self._profile_model(task, inputs, super()._apply)
@@ -219,6 +221,7 @@ class ProfiledWorker(OwnedWorker):
 				if self.incremental is not None
 				else {}
 			)
+			self._profile_before = profile_snapshot(self.profile())
 			self._profile_window += 1
 			self._model_events.clear()
 			self._rss = MemorySampler()
@@ -273,6 +276,13 @@ class ProfiledWorker(OwnedWorker):
 			if self.incremental is not None
 			else None
 		)
+		worker_profile = profile_snapshot(self.profile())
+		report["policy_window"] = (
+			profile_window(self._profile_before, worker_profile)
+			if self._profile_before is not None and isinstance(worker_profile, dict)
+			else None
+		)
+		report["worker_profile"] = worker_profile
 		report["cuda"] = (
 			None
 			if self.comm.device.type != "cuda"

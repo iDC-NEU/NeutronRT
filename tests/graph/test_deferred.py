@@ -5,14 +5,93 @@ import torch
 
 from lib.graph.admission import AdmissionFull, UpdateAdmission, UpdateKind
 from lib.graph.deferred import DeferredUpdates
+from lib.runtime.policies import DeferredPolicyConfig
 from tests.graph.test_serving import _current_reference, _setup
 
 
-def _initialized(name="sage", *, max_versions=10, idle_seconds=60):
+class _FakeTimer:
+	def __init__(self, seconds, callback, *, args):
+		self.seconds, self.callback, self.args = seconds, callback, args
+		self.daemon = False
+		self.started = False
+		self.cancelled = False
+
+	def start(self):
+		self.started = True
+
+	def cancel(self):
+		self.cancelled = True
+
+
+def _initialized(name="sage", *, max_versions=10, idle_seconds=60, policy=None, clock=None, timers=None):
 	service, plane, storage, _ = _setup(name, batch_size=2)
 	service.ensure(torch.arange(6))
-	deferred = DeferredUpdates(service, max_versions=max_versions, idle_seconds=idle_seconds)
+	timer_factory = None
+	if timers is not None:
+
+		def timer_factory(seconds, callback, args):
+			timer = _FakeTimer(seconds, callback, args=args)
+			timers.append(timer)
+			return timer
+
+	deferred = DeferredUpdates(
+		service,
+		max_versions=max_versions,
+		idle_seconds=idle_seconds,
+		policy=policy,
+		**({"clock": clock, "timer_factory": timer_factory} if clock is not None else {}),
+	)
 	return service, plane, storage, deferred
+
+
+def test_fixed_time_waiting_is_distinct_from_the_version_window_baseline():
+	clock = [0.0]
+	timers = []
+	service, plane, _, deferred = _initialized(
+		policy=DeferredPolicyConfig(mode="fixed_time", window_seconds=10), clock=lambda: clock[0], timers=timers
+	)
+	try:
+		first = deferred.submit("features", torch.tensor([1]), service.features[[1]] + 1)
+		second = deferred.submit("features", torch.tensor([1]), service.features[[1]] + 2)
+		assert not first.done() and not second.done() and deferred.pending == 2
+		assert len(timers) == 1 and timers[0].seconds == 10
+		clock[0] = 5
+		timers[0].callback(*timers[0].args)
+		assert not first.done() and deferred.pending == 2
+		assert len(timers) == 2 and timers[1].seconds == 5
+		third = deferred.submit("features", torch.tensor([1]), service.features[[1]] + 3)
+		assert not first.done() and not third.done() and len(timers) == 2
+		clock[0] = 10
+		fourth = deferred.submit("features", torch.tensor([1]), service.features[[1]] + 4)
+		assert first.result().version == second.result().version == 3
+		assert not fourth.done() and deferred.pending == 1
+		assert deferred.profile()["mode"] == "fixed_time"
+		deferred.flush()
+		assert third.result().version == 3 and fourth.result().version == 4
+	finally:
+		deferred.close()
+		plane.close()
+
+
+def test_hotspot_policy_flushes_non_hot_changes_and_caps_hotspot_batches():
+	service, plane, _, deferred = _initialized(
+		policy=DeferredPolicyConfig(
+			mode="hotspot", window_seconds=30, hotspot_degree_threshold=1, hotspot_max_changes=2
+		),
+		clock=lambda: 0.0,
+		timers=[],
+	)
+	try:
+		first = deferred.submit("features", torch.tensor([0]), service.features[[0]] + 1)
+		second = deferred.submit("features", torch.tensor([0]), service.features[[0]] + 2)
+		assert first.done() and second.done() and first.result().version == second.result().version == 2
+		third = deferred.submit("features", torch.tensor([0]), service.features[[0]] + 3)
+		fourth = deferred.submit("features", torch.tensor([5]), service.features[[5]] + 4)
+		assert third.done() and fourth.done()
+		assert third.result().version == 3 and fourth.result().version == 4
+	finally:
+		deferred.close()
+		plane.close()
 
 
 @pytest.mark.parametrize("name", ["sage", "gat", "gcn"])

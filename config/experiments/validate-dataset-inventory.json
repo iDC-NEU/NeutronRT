@@ -1,0 +1,7 @@
+{
+  "id": "six-dataset-integrity-audit-v1",
+  "hardware_profile": "prepare-friendster",
+  "wall_seconds": 14400,
+  "environment": {"CUDA_VISIBLE_DEVICES": "", "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1"},
+  "command": ["{python}", "-m", "scripts.validate.dataset_inventory", "--registry", "config/experiments/datasets.json", "--output", "{output}/dataset-inventory.json", "--full"]
+}

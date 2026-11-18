@@ -1,5 +1,31 @@
 {
   "schema_version": 1,
+  "comparison_groups": {
+    "dedicated_reference": {
+      "implementations": ["dgl-official-2.4.0"],
+      "execution": "Standalone native DGL runner; no NeutronRT planner, dispatcher, embedding service or delta execution",
+      "display_names": ["RTEC-FULL (DGL)", "RTEC-NS (DGL)"]
+    },
+    "external_systems": {
+      "implementations": ["inkstream", "ripple", "helios"],
+      "acceptance": "Author artifact, pinned source, supported semantics, correctness and matched measurement contract required before performance inclusion"
+    },
+    "framework_ablations": {
+      "implementations": ["NeutronRT-hosted Full", "NeutronRT-hosted NS", "NeutronRT-hosted UER", "user-layerwise UER"],
+      "execution": "Internal policies or author adaptations; never label as reproductions of the corresponding external system"
+    }
+  },
+  "standard_inference_backend": {
+    "id": "dgl-official-2.4.0",
+    "repository": "https://github.com/dmlc/dgl",
+    "release": "v2.4.0",
+    "revision": "c6c874bf7ea085beb04ea1487cfd216a0bacd6c1",
+    "example": "examples/pytorch/graphsage/node_classification.py",
+    "sampler_source": "python/dgl/dataloading/neighbor_sampler.py",
+    "selection": "Official layerwise bootstrap and native affected-output full/sampled inference",
+    "runtime": "Frozen graph environment DGL 2.4.0+cu124; installed build identity recorded per cohort",
+    "status": "DGL40_and_external21_focused_tests_reviewed; CPU regression and hardware integration pending; no accepted new performance results"
+  },
   "icde": {
     "branch": "origin/vldb",
     "revision": "e6e38887cf94005453d049901010b1d2cc0ce6f7",
@@ -25,7 +51,16 @@
       "id": "icde-uer",
       "source": "icde",
       "implementation": "lib/methods/cache.py:Cache",
-      "description": "Original intermediate-embedding reuse baseline"
+      "description": "User's layerwise UER adaptation; reuse this implementation for the shared DGL replay",
+      "inspiration": {
+        "title": "λGrapher: A Resource-Efficient Serverless System for GNN Serving through Graph Sharing",
+        "venue": "WWW 2024",
+        "doi": "10.1145/3589334.3645383",
+        "paper": "https://fangmingliu.github.io/files/WWW24-LambdaGrapher.pdf",
+        "section": "3.4 Graph Scheduler: HAG-based graph sharing"
+      },
+      "implementation_provenance": "User-confirmed layerwise adaptation, not the original Knative deployment or an official DGL UER algorithm",
+      "integration_status": "exact_layerwise_adapter_and_no_self_loop_regression_passed; full_CPU_and_hardware_validation_pending"
     },
     {
       "id": "icde-inc",
@@ -35,6 +70,8 @@
     },
     {
       "id": "inkstream",
+      "venue": "IPDPS 2025",
+      "comparison_status": "artifact_verification_exists; unchanged mean-SAGE numerical gate failed; performance admission pending",
       "repository": "https://github.com/WuDan0399/InkStream",
       "revision": "5d3597dc5842bcdf125680b4b012f53ac28b8f86",
       "branch": "release",
@@ -43,12 +80,29 @@
     },
     {
       "id": "ripple",
+      "target_comparison": "RIPPLE++ (2026 author artifact); first accepted subset targets single-machine GC-M",
+      "venue": "ICDCS 2025; RIPPLE++ extension is a 2026 preprint",
+      "conference_paper": "https://arxiv.org/abs/2505.12112",
+      "comparison_status": "author GC-mean fixture and stateful replay adapter implemented; matched performance cohort pending",
+      "extension_coverage": "Do not infer complete RIPPLE++ implementation coverage from the repository README; audit the pinned source",
       "repository": "https://github.com/dream-lab/ripple",
       "revision": "002016df9518f451354dded9096ffb7c52e3ed60",
       "paper": "https://arxiv.org/abs/2601.12347",
       "runtime": "Authors NumPy CPU implementation; DGL reference workloads",
       "reference_implementation": "src/workloads/<workload>/single/rc.py",
       "incremental_implementation": "src/workloads/<workload>/single/in.py"
+    },
+    {
+      "id": "helios",
+      "repository": "https://github.com/alibaba/graph-learn",
+      "revision": "9a68c333c0c813f90361880f5b328b35cf0ecd70",
+      "venue": "PPoPP 2025",
+      "paper": "https://jiesun233.github.io/files/ppopp25-final32.pdf",
+      "doi": "10.1145/3710848.3710854",
+      "artifact_path": "dynamic_graph_service",
+      "runtime": "Author Graph-Learn Dynamic Graph Service; no admitted full-system build or runner",
+      "mechanism_audit": "Pinned source identifies timestamp-top-k; no verified matched uniform-sampling path",
+      "comparison_status": "unsupported for current matched uniform-sampling cohort; retain as an explicit unmeasured candidate"
     }
   ]
 }

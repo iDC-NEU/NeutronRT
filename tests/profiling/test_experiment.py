@@ -1,10 +1,11 @@
 import hashlib
 import json
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import pytest
 import torch
+from typer.testing import CliRunner
 
 from lib.profiling.experiment import (
 	ProfileCase,
@@ -169,6 +170,83 @@ def test_sparse_settings_are_retained_as_trial_identity():
 	assert case.delta_max_steps == 8 and case.delta_anchor_bytes == 0
 
 
+def test_policy_profile_case_fields_validate_and_are_part_of_identity_configuration():
+	case = ProfileCase.from_dict(
+		{
+			"name": "policy",
+			"dispatch_mode": "locality-load",
+			"dispatch_locality_weight": 2.0,
+			"dispatch_load_weight": 0.5,
+			"deferred_mode": "hotspot",
+			"deferred_window_seconds": 0.25,
+			"hotspot_degree_threshold": 3,
+			"hotspot_max_changes": 8,
+			"switches": {"bounded_staleness": True},
+		}
+	)
+	configuration = case.profile_configuration()
+	assert configuration["dispatch_mode"] == "locality_load"
+	assert ProfileCase.from_dict({"name": "alias", "dispatch_policy": "round-robin"}).dispatch_mode == "round-robin"
+	with pytest.raises(ValueError, match="disagree"):
+		ProfileCase.from_dict({"name": "conflict", "dispatch_mode": "round_robin", "dispatch_policy": "locality_load"})
+	assert configuration["deferred_mode"] == "hotspot"
+	assert configuration["switches"]["bounded_staleness"]
+	for values in (
+		{"dispatch_mode": "unknown"},
+		{"worker_feature_cache_bytes": 1},
+		{"deferred_mode": "hotspot", "deferred_window_seconds": None},
+	):
+		with pytest.raises((ValueError, NotImplementedError)):
+			ProfileCase.from_dict({"name": "invalid", **values})
+	with pytest.raises(NotImplementedError):
+		ProfileCase.from_dict(
+			{
+				"name": "cache",
+				"worker_feature_cache_bytes": 4096,
+				"switches": {"worker_feature_cache": True},
+			}
+		)
+	disabled = ProfileCase.from_dict({"name": "disabled", "deferred_mode": "version_window"})
+	assert disabled.profile_configuration()["deferred_mode"] == "disabled"
+
+
+def test_profile_cli_dry_run_retains_policy_fields_without_starting_runtime(tmp_path):
+	from scripts.evaluate.profile import app
+
+	cases = tmp_path / "cases.json"
+	cases.write_text(
+		json.dumps(
+			[
+				{
+					"name": "policy",
+					"dispatch_mode": "locality_load",
+					"dispatch_locality_weight": 2.0,
+					"dispatch_load_weight": 0.5,
+					"switches": {"bounded_staleness": True},
+					"deferred_mode": "fixed_time",
+					"deferred_window_seconds": 0.1,
+				}
+			]
+		)
+	)
+	result = CliRunner().invoke(
+		app,
+		[
+			"--data",
+			str(tmp_path / "missing-data"),
+			"--cases",
+			str(cases),
+			"--output",
+			str(tmp_path / "output"),
+			"--dry-run",
+		],
+	)
+	assert result.exit_code == 0, result.stdout
+	payload = json.loads(result.stdout)
+	assert payload["settings"][0]["dispatch_mode"] == "locality_load"
+	assert payload["settings"][0]["deferred_window_seconds"] == 0.1
+
+
 def test_checked_in_sparse_comparisons_keep_equal_topology_and_explicit_refresh_intervals():
 	root = Path(__file__).resolve().parents[2]
 	for name, steps in (
@@ -206,3 +284,52 @@ def test_aggregate_delta_comparisons_isolate_retention_and_keep_embedding_and_fu
 		assert sparse.delta_anchor_bytes == retained.delta_anchor_bytes
 		assert {case.storage_partitions for case in cases} == {3}
 		assert {case.devices for case in cases} == {("cpu", "cpu")}
+
+
+def test_component_ablation_matrix_has_valid_isolated_pairs_and_supported_interaction():
+	root = Path(__file__).resolve().parents[2]
+	path = root / "examples" / "profiles" / "nrtinc-component-ablations-cpu.json"
+	cases = read_cases(json.loads(path.read_text()))
+	by_name = {case.name: case for case in cases}
+
+	def isolated_pair(left_name, right_name, field, *, nested=None):
+		left = by_name[left_name]
+		right = by_name[right_name]
+		assert right.reference == left.name
+		left_values, right_values = asdict(left), asdict(right)
+		for values in (left_values, right_values):
+			values.pop("name")
+			values.pop("reference")
+		if nested == "switches":
+			left_switches, right_switches = left_values.pop("switches"), right_values.pop("switches")
+			assert left_switches[field] is False and right_switches[field] is True
+			left_switches.pop(field)
+			right_switches.pop(field)
+			assert left_switches == right_switches
+		else:
+			assert left_values[field] != right_values[field]
+			left_values[field] = right_values[field]
+		assert left_values == right_values
+
+	isolated_pair("operator-recompute", "operator-incremental", "operator_incremental", nested="switches")
+	isolated_pair("pipeline-off", "pipeline-on", "pipeline", nested="switches")
+	isolated_pair("aggregates-not-retained", "aggregates-retained", "retain_aggregates", nested="switches")
+	isolated_pair("sparse-aggregate-off", "sparse-aggregate-on", "incremental_aggregates", nested="switches")
+	isolated_pair("row-refresh-off", "row-refresh-on", "row_refresh", nested="switches")
+	isolated_pair("refresh-every-8", "refresh-every-32", "delta_max_steps")
+	isolated_pair("dispatch-round-robin", "dispatch-locality-load", "dispatch_mode")
+	isolated_pair("admission-cap-1", "admission-cap-8", "max_inflight")
+	isolated_pair("compute-serial", "compute-concurrent", "concurrent_compute", nested="switches")
+	assert by_name["deferred-fixed-time"].reference == "deferred-disabled"
+	assert by_name["deferred-hotspot"].reference == "deferred-fixed-time"
+	assert by_name["interaction-pipeline-locality-fixed"].profile_configuration()["deferred_mode"] == "fixed_time"
+	assert by_name["interaction-pipeline-locality-fixed"].dispatch_mode == "locality_load"
+
+	with pytest.raises(NotImplementedError, match="miss-only|protocol"):
+		ProfileCase.from_dict(
+			{
+				"name": "unsupported-cache",
+				"worker_feature_cache_bytes": 4096,
+				"switches": {"worker_feature_cache": True},
+			}
+		)

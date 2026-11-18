@@ -1,0 +1,64 @@
+{
+  "id": "resident-mutation-controls-diagnostic-v1",
+  "wall_seconds": 300,
+  "startup_seconds": 120,
+  "purpose": "Frozen old code causal diagnostic: oracle on/off, nested fences on/off; not paper performance",
+  "trials": [
+    {
+      "id": "no-oracle-no-fences",
+      "command": [
+        "{python}",
+        "-m",
+        "scripts.validate.resident_mutation_profile",
+        "--frozen-source",
+        "/home/lhr/NeutronRT/logs/submissions/a9ba1ae47ad1421680f003c861cc287f/source",
+        "--output",
+        "{trial}/report",
+        "--no-oracle",
+        "--no-nested-fences"
+      ]
+    },
+    {
+      "id": "no-oracle-fences",
+      "command": [
+        "{python}",
+        "-m",
+        "scripts.validate.resident_mutation_profile",
+        "--frozen-source",
+        "/home/lhr/NeutronRT/logs/submissions/a9ba1ae47ad1421680f003c861cc287f/source",
+        "--output",
+        "{trial}/report",
+        "--no-oracle",
+        "--nested-fences"
+      ]
+    },
+    {
+      "id": "oracle-no-fences",
+      "command": [
+        "{python}",
+        "-m",
+        "scripts.validate.resident_mutation_profile",
+        "--frozen-source",
+        "/home/lhr/NeutronRT/logs/submissions/a9ba1ae47ad1421680f003c861cc287f/source",
+        "--output",
+        "{trial}/report",
+        "--oracle",
+        "--no-nested-fences"
+      ]
+    },
+    {
+      "id": "oracle-fences",
+      "command": [
+        "{python}",
+        "-m",
+        "scripts.validate.resident_mutation_profile",
+        "--frozen-source",
+        "/home/lhr/NeutronRT/logs/submissions/a9ba1ae47ad1421680f003c861cc287f/source",
+        "--output",
+        "{trial}/report",
+        "--oracle",
+        "--nested-fences"
+      ]
+    }
+  ]
+}

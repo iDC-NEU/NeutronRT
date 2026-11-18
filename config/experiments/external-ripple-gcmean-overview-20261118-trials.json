@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "cohort_kind": "planned",
+  "id": "external-ripple-gcmean-overview-20261118-v1",
+  "artifact": "ripple",
+  "display_name": "Ripple author incremental GC-mean",
+  "processor": "incremental",
+  "source_checkout": "/tmp/neutronrt-paper-ripple",
+  "python_executable": "/home/hdd/lvhr/miniconda/envs/graph/bin/python",
+  "hardware_profile": "external-cpu",
+  "trial_timeout_seconds": 3500,
+  "checkpoint": "/mnt/nfs0/lvhr/neutronrt-evaluation-data/checkpoints/sage-arxiv.pt",
+  "workload_contract": {
+    "update_requests": 20,
+    "updates": {
+      "features": {"requests": 7, "changes_per_request": 128},
+      "insert": {"requests": 7, "changes_per_request": 128},
+      "delete": {"requests": 6, "changes_per_request": 128}
+    },
+    "query_requests": 20,
+    "query_rows": 1280
+  },
+  "algorithm_scope": "Pinned author incremental processor, w3_gcn_mean / GC-mean; explicit zero-self compatibility checkpoint derived into each trial output; not standard trained GraphSAGE. Products uses fixed random initialization; arXiv starts from the fresh trained checkpoint with self terms explicitly zeroed. This is a system-level overview, not an algorithm-equivalence or paired-speedup claim.",
+  "trials": [
+    {"id": "arxiv-r0", "dataset": "arxiv", "repetition": 0, "trace_seed": 71, "trace_digest": "b7b2ae928832073638c1f81d953facc7e0a5f77b78fb2f0e5710b7ef34c3a897", "workload": "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/arxiv-NrtInc-r0/report/sage-NrtInc-0-workload.pt", "graph": "/mnt/nfs0/lvhr/neutronrt-evaluation-data/arxiv/raw"},
+    {"id": "arxiv-r1", "dataset": "arxiv", "repetition": 1, "trace_seed": 72, "trace_digest": "40c1a9b33635d526509c3be51b59bdcaef92914b44c361d577fff2f9c79a11e4", "workload": "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/arxiv-NrtInc-r1/report/sage-NrtInc-1-workload.pt", "graph": "/mnt/nfs0/lvhr/neutronrt-evaluation-data/arxiv/raw"},
+    {"id": "arxiv-r2", "dataset": "arxiv", "repetition": 2, "trace_seed": 73, "trace_digest": "3e698b76f8c573b2852d1f3f34d246a9c71b423d954723420c3d1885140262b4", "workload": "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/arxiv-NrtInc-r2/report/sage-NrtInc-2-workload.pt", "graph": "/mnt/nfs0/lvhr/neutronrt-evaluation-data/arxiv/raw"},
+    {"id": "arxiv-r3", "dataset": "arxiv", "repetition": 3, "trace_seed": 74, "trace_digest": "9b924ea0ae81896377f3d08353eca6ae2d69158ea10d6728097be3f8b29f448a", "workload": "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/arxiv-NrtInc-r3/report/sage-NrtInc-3-workload.pt", "graph": "/mnt/nfs0/lvhr/neutronrt-evaluation-data/arxiv/raw"},
+    {"id": "arxiv-r4", "dataset": "arxiv", "repetition": 4, "trace_seed": 75, "trace_digest": "83b397940f88c1d6f67c84bda4b9fb784e9866ff27c0b3914befb29a37603b01", "workload": "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/arxiv-NrtInc-r4/report/sage-NrtInc-4-workload.pt", "graph": "/mnt/nfs0/lvhr/neutronrt-evaluation-data/arxiv/raw"},
+    {"id": "products-r0", "dataset": "products", "repetition": 0, "trace_seed": 71, "trace_digest": "141ce29af649035640ec7a1dee3b761cd44683f089597ab191140ccd3b596397", "workload": "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/products-NrtInc-r0/report/sage-NrtInc-0-workload.pt", "graph": "/mnt/nfs0/lvhr/neutronrt-evaluation-data/products/raw"},
+    {"id": "products-r1", "dataset": "products", "repetition": 1, "trace_seed": 72, "trace_digest": "c8c28a2b75ee154b141abca20dcd7fa92590fc49aedfa5a4938d2000a9b3752d", "workload": "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/products-NrtInc-r1/report/sage-NrtInc-1-workload.pt", "graph": "/mnt/nfs0/lvhr/neutronrt-evaluation-data/products/raw"},
+    {"id": "products-r2", "dataset": "products", "repetition": 2, "trace_seed": 73, "trace_digest": "9b3962f199158107f18aedad92941bab6f767dd436d43bf30f7910d8674115e0", "workload": "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/products-NrtInc-r2/report/sage-NrtInc-2-workload.pt", "graph": "/mnt/nfs0/lvhr/neutronrt-evaluation-data/products/raw"},
+    {"id": "products-r3", "dataset": "products", "repetition": 3, "trace_seed": 74, "trace_digest": "5a6bdf04fe86ff8ea38e64473f9171660ef83f4ef965d8a53cc5195acb71915b", "workload": "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/products-NrtInc-r3/report/sage-NrtInc-3-workload.pt", "graph": "/mnt/nfs0/lvhr/neutronrt-evaluation-data/products/raw"},
+    {"id": "products-r4", "dataset": "products", "repetition": 4, "trace_seed": 75, "trace_digest": "95e6978e4c2105f729da8bd62c3b35b6fcf3462e98f15c6488d6a8b5e95ed668", "workload": "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/products-NrtInc-r4/report/sage-NrtInc-4-workload.pt", "graph": "/mnt/nfs0/lvhr/neutronrt-evaluation-data/products/raw"}
+  ]
+}

@@ -3,7 +3,7 @@
 import logging
 from concurrent.futures import TimeoutError
 from functools import wraps
-from time import monotonic
+from time import monotonic, perf_counter_ns
 from typing import Optional, cast
 
 import grpc
@@ -143,8 +143,15 @@ class OwnedServicer(OwnedInferenceServicer):
 
 	def _wait(self, entry: CompletionTicket, context, *, poll: bool = False) -> wire.Completion:
 		if poll and not entry.future.done():
-			return wire.Completion(ticket=_ticket(entry), ready=False)
-		result = entry.result(timeout=context.time_remaining())
+			return wire.Completion(ticket=_ticket(entry), ready=False, **self._telemetry(entry, observed=True))
+		try:
+			result = entry.result(timeout=context.time_remaining())
+		except BaseException:
+			# A failed or timed-out wait still records the server reply boundary.
+			# The RPC error semantics remain unchanged; lifecycle data is retained
+			# for a later profile/status read while the admission record is retained.
+			self.admission.profile(entry.number, observed_at_ns=perf_counter_ns())
+			raise
 		return wire.Completion(
 			ticket=_ticket(entry),
 			ready=True,
@@ -153,7 +160,29 @@ class OwnedServicer(OwnedInferenceServicer):
 			input_changes=result.input_changes,
 			model_tasks=result.tasks,
 			input_version=result.input_version,
+			**self._telemetry(entry, observed=True),
 		)
+
+	def _telemetry(self, entry: CompletionTicket, *, observed: bool) -> dict:
+		profile = self.admission.profile(entry.number, observed_at_ns=perf_counter_ns() if observed else None)
+		if profile is None:
+			return {}
+		fields = {
+			"admitted_at_ns": profile["admitted_at_ns"],
+			"execution_started_at_ns": profile["execution_started_at_ns"],
+			"staged_at_ns": profile["staged_at_ns"],
+			"publication_observed_at_ns": profile["publication_observed_at_ns"],
+			"completion_at_ns": profile["completion_at_ns"],
+			"server_reply_prepared_at_ns": profile["server_reply_prepared_at_ns"],
+			"queue_wait_ns": profile["queue_wait_ns"],
+			"execution_ns": profile["execution_ns"],
+			"delayed_publication_wait_ns": profile["delayed_publication_wait_ns"],
+		}
+		return {name: value for name, value in fields.items() if value is not None} | {
+			"timestamp_scope": profile["clock_scope"],
+			"publication_source": profile["publication_source"] or "",
+			"state": profile["state"],
+		}
 
 	@_rpc
 	def Sync(self, request, context):
@@ -203,6 +232,8 @@ class OwnedServicer(OwnedInferenceServicer):
 			recovery_rows=service.counters.recovery_rows,
 			recovery_seconds=service.counters.recovery_seconds,
 			uptime_seconds=monotonic() - self._started,
+			admitted_updates=counters.admitted,
+			pending_update_bytes=counters.pending_bytes,
 			max_staleness=service.deferred.max_versions if service.deferred is not None else 0,
 		)
 		pending = service._pending_update

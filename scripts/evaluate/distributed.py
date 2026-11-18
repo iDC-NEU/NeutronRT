@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import platform
+import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from dataclasses import asdict, dataclass
@@ -28,7 +29,7 @@ from lib.graph.methods import (
 from lib.graph.ownership import Owner
 from lib.models import MODEL_NAMES
 from lib.models.spec import ModelSpec
-from lib.profiling.accuracy import query_error, targeted_sample, verification_sample
+from lib.profiling.accuracy import load_test_labels, query_error, targeted_sample, verification_sample
 from lib.profiling.controller import RuntimeProfiler
 from lib.profiling.experiment import (
 	inference_identity,
@@ -67,6 +68,13 @@ IncrementalEngineChoice = StrEnum(  # type: ignore[misc]  # Mypy requires litera
 InitializationChoice = StrEnum(  # type: ignore[misc]  # Mypy requires literal Enum members.
 	"InitializationChoice", {str(value).replace("-", "_").upper(): value for value in ["queries", "all"]}
 )
+DispatchChoice = StrEnum(  # type: ignore[misc]  # Mypy requires literal Enum members.
+	"DispatchChoice", {str(value).replace("-", "_").upper(): value for value in ["round_robin", "locality_load"]}
+)
+DeferredPolicyChoice = StrEnum(  # type: ignore[misc]  # Mypy requires literal Enum members.
+	"DeferredPolicyChoice",
+	{str(value).replace("-", "_").upper(): value for value in ["disabled", "version_window", "fixed_time", "hotspot"]},
+)
 
 
 _DEFAULT_NODE_SELECTION = NodeSelectionChoice("neighbors")
@@ -75,6 +83,8 @@ _DEFAULT_BACKEND = BackendChoice("auto")
 _DEFAULT_TOPOLOGY = TopologyChoice("dgl")
 _DEFAULT_INCREMENTAL_ENGINE = IncrementalEngineChoice("auto")
 _DEFAULT_INITIALIZATION = InitializationChoice("all")
+_DEFAULT_DISPATCH = DispatchChoice("round_robin")
+_DEFAULT_DEFERRED_POLICY = DeferredPolicyChoice("disabled")
 
 
 @dataclass
@@ -96,6 +106,8 @@ class Options:
 	models: list[str]
 	methods: list[str]
 	repetitions: int
+	repetition_offset: int
+	phase_file: Path | None
 	fanout: int
 	warmup: int
 	updates: int
@@ -132,6 +144,7 @@ class Options:
 	concurrent_compute: bool
 	topology: str
 	topology_root: Path | None
+	topology_base: Path | None
 	storage_partitions: int
 	storage_node_names: list[str] | None
 	storage_node_capacity_bytes: int
@@ -142,7 +155,19 @@ class Options:
 	incremental_engine: str
 	initialization: str
 	initialization_batch_size: int
+	dispatch_policy: str
+	dispatch_locality_weight: float
+	dispatch_load_weight: float
+	worker_feature_cache: bool
+	worker_feature_cache_bytes: int
+	deferred_mode: str
+	max_stale_versions: int
+	deferred_window_seconds: float | None
+	hotspot_degree_threshold: int | None
+	hotspot_max_changes: int | None
 	source_fingerprint: str = ""
+	labels: Path | None = None
+	test_split: Path | None = None
 
 
 app = typer.Typer(help=__doc__, no_args_is_help=True, pretty_exceptions_show_locals=False)
@@ -173,6 +198,8 @@ def main(
 		list[MethodsChoice] | None, typer.Option("--methods", help="Inference algorithm to execute.")
 	] = None,
 	repetitions: Annotated[int, typer.Option("--repetitions")] = 5,
+	repetition_offset: Annotated[int, typer.Option("--repetition-offset", min=0)] = 0,
+	phase_file: Annotated[Path | None, typer.Option("--phase-file")] = None,
 	fanout: Annotated[int, typer.Option("--fanout", min=1, help="Neighbors per node at every layer of RTEC-NS")] = 5,
 	warmup: Annotated[int, typer.Option("--warmup")] = 3,
 	updates: Annotated[int, typer.Option("--updates")] = 6,
@@ -182,6 +209,8 @@ def main(
 	] = None,
 	workload: Annotated[WorkloadChoice, typer.Option("--workload")] = _DEFAULT_WORKLOAD,
 	checkpoint: Annotated[Path | None, typer.Option("--checkpoint")] = None,
+	labels: Annotated[Path | None, typer.Option("--labels", exists=True)] = None,
+	test_split: Annotated[Path | None, typer.Option("--test-split", exists=True)] = None,
 	atol: Annotated[float, typer.Option("--atol")] = 5e-05,
 	rtol: Annotated[float, typer.Option("--rtol")] = 5e-05,
 	queries: Annotated[int, typer.Option("--queries")] = 64,
@@ -236,6 +265,13 @@ def main(
 	topology_root: Annotated[
 		Path | None, typer.Option("--topology-root", help="Working directory for mapped adjacency files")
 	] = None,
+	topology_base: Annotated[
+		Path | None,
+		typer.Option(
+			"--topology-base",
+			help="Existing exported mapped adjacency directory; required with remote storage endpoints",
+		),
+	] = None,
 	storage_partitions: Annotated[int, typer.Option("--storage-partitions")] = 1,
 	storage_node_names: Annotated[
 		list[str] | None,
@@ -268,6 +304,16 @@ def main(
 			"--initialization-batch-size", min=1, help="Rows per bulk initialization request, before task splitting"
 		),
 	] = 65536,
+	dispatch_policy: Annotated[DispatchChoice, typer.Option("--dispatch-policy")] = _DEFAULT_DISPATCH,
+	dispatch_locality_weight: Annotated[float, typer.Option("--dispatch-locality-weight", min=0)] = 1.0,
+	dispatch_load_weight: Annotated[float, typer.Option("--dispatch-load-weight", min=0)] = 1.0,
+	worker_feature_cache: Annotated[bool, typer.Option("--worker-feature-cache/--no-worker-feature-cache")] = False,
+	worker_feature_cache_bytes: Annotated[int, typer.Option("--worker-feature-cache-bytes", min=0)] = 0,
+	deferred_mode: Annotated[DeferredPolicyChoice, typer.Option("--deferred-mode")] = _DEFAULT_DEFERRED_POLICY,
+	max_stale_versions: Annotated[int, typer.Option("--max-stale-versions", min=0)] = 2,
+	deferred_window_seconds: Annotated[float | None, typer.Option("--deferred-window-seconds", min=0)] = None,
+	hotspot_degree_threshold: Annotated[int | None, typer.Option("--hotspot-degree-threshold", min=0)] = None,
+	hotspot_max_changes: Annotated[int | None, typer.Option("--hotspot-max-changes", min=1)] = None,
 ):
 	args = Options(
 		**{
@@ -282,6 +328,8 @@ def main(
 			"storage_endpoints": storage_endpoints,
 			"incremental_engine": incremental_engine.value,
 			"initialization": initialization.value,
+			"dispatch_policy": dispatch_policy.value,
+			"deferred_mode": deferred_mode.value,
 		}
 	)
 	if args.topology == "mapped" and any(name in ("pinsage", "rgcn", "rgat", "monet") for name in args.models):
@@ -290,6 +338,47 @@ def main(
 		raise typer.BadParameter("Pass one --storage-node label per storage partition")
 	if args.storage_endpoints is not None and len(args.storage_endpoints) != args.storage_partitions:
 		raise typer.BadParameter("Pass one --storage-endpoint per storage partition")
+	if args.storage_endpoints is not None and args.topology_base is None:
+		raise typer.BadParameter(
+			"Remote mapped storage requires --topology-base pointing to an existing BaseTopology.export directory"
+		)
+	if args.dispatch_locality_weight == 0 and args.dispatch_load_weight == 0:
+		raise typer.BadParameter("At least one dispatch policy weight must be positive")
+	if args.worker_feature_cache and args.worker_feature_cache_bytes < 1:
+		raise typer.BadParameter("--worker-feature-cache requires a positive --worker-feature-cache-bytes budget")
+	if not args.worker_feature_cache and args.worker_feature_cache_bytes:
+		raise typer.BadParameter("--worker-feature-cache-bytes requires --worker-feature-cache")
+	if args.worker_feature_cache:
+		raise typer.BadParameter(
+			"--worker-feature-cache is currently unsupported: the wire protocol has no miss-only cache path"
+		)
+	if args.deferred_mode == "disabled":
+		if (
+			args.max_stale_versions != 2
+			or args.deferred_window_seconds is not None
+			or args.hotspot_degree_threshold is not None
+			or args.hotspot_max_changes is not None
+		):
+			raise typer.BadParameter(
+				"Deferred policy options require --deferred-mode version_window, fixed_time, or hotspot"
+			)
+	elif args.deferred_mode == "version_window":
+		if (
+			args.deferred_window_seconds is not None
+			or args.hotspot_degree_threshold is not None
+			or args.hotspot_max_changes is not None
+		):
+			raise typer.BadParameter("Version-window mode accepts only --max-stale-versions")
+	elif args.deferred_mode == "fixed_time":
+		if args.deferred_window_seconds is None or args.deferred_window_seconds <= 0:
+			raise typer.BadParameter("Fixed-time mode requires a positive --deferred-window-seconds")
+		if args.hotspot_degree_threshold is not None or args.hotspot_max_changes is not None:
+			raise typer.BadParameter("Fixed-time mode does not accept hotspot options")
+	else:
+		if args.deferred_window_seconds is None or args.deferred_window_seconds <= 0:
+			raise typer.BadParameter("Hotspot mode requires a positive --deferred-window-seconds")
+		if args.hotspot_degree_threshold is None or args.hotspot_max_changes is None:
+			raise typer.BadParameter("Hotspot mode requires degree threshold and maximum changes")
 	if (
 		args.storage_node_capacity_bytes < 1
 		or args.storage_node_reserve_bytes < 0
@@ -368,7 +457,21 @@ def attributes(count, spec, generator):
 
 
 @torch.inference_mode()
-def verify(stub, model, graph, features, *, atol=5e-5, rtol=5e-5, exact=True, timeout=180, nodes=None, batch_size=512):
+def verify(
+	stub,
+	model,
+	graph,
+	features,
+	*,
+	atol=5e-5,
+	rtol=5e-5,
+	exact=True,
+	timeout=180,
+	nodes=None,
+	batch_size=512,
+	labels=None,
+	test_mask=None,
+):
 	if batch_size < 1:
 		raise ValueError("Verification batch size must be positive")
 	nodes = torch.arange(graph.num_nodes()) if nodes is None else nodes
@@ -380,6 +483,7 @@ def verify(stub, model, graph, features, *, atol=5e-5, rtol=5e-5, exact=True, ti
 		expected = model(layer, graph, expected)
 	squared_error, elements, max_error, disagreement = 0.0, 0, 0.0, 0
 	version = None
+	labelled, correct, fresh_correct = 0, 0, 0
 	# Leave room for protobuf framing in the 64 MiB RPC response budget.
 	rows_per_call = min(batch_size, (60 * 1024**2) // (4 * expected.shape[1]))
 	if rows_per_call < 1:
@@ -398,6 +502,11 @@ def verify(stub, model, graph, features, *, atol=5e-5, rtol=5e-5, exact=True, ti
 		elements += actual.numel()
 		max_error = max(max_error, errors["max_abs_error"])
 		disagreement += int((actual.argmax(1) != reference.argmax(1)).sum())
+		if labels is not None:
+			selected = test_mask[chunk] & (labels[chunk] >= 0) & (labels[chunk] < actual.shape[1])
+			labelled += int(selected.sum())
+			correct += int((actual.argmax(1)[selected] == labels[chunk][selected]).sum())
+			fresh_correct += int((reference.argmax(1)[selected] == labels[chunk][selected]).sum())
 	mse = squared_error / elements
 	if exact and mse >= 1e-4:
 		raise AssertionError(f"Embedding MSE {mse} exceeds the embedding MSE limit (1e-4)")
@@ -414,6 +523,10 @@ def verify(stub, model, graph, features, *, atol=5e-5, rtol=5e-5, exact=True, ti
 		"relative_tolerance": rtol,
 		"prediction_disagreements": disagreement,
 		"exact_equivalence_required": exact,
+		"labelled_test_rows": labelled,
+		"sample_test_accuracy": correct / labelled if labelled else None,
+		"fresh_sample_test_accuracy": fresh_correct / labelled if labelled else None,
+		"accuracy_loss_percentage_points": 100 * (fresh_correct - correct) / labelled if labelled else None,
 	}
 
 
@@ -510,6 +623,10 @@ def execute_update(stub, request, timeout, *, duplicate=False):
 
 def trial(args, placement, base_graph, base_features, name, method, repetition):
 	incremental = validate_method(method) == NRT_INC
+	dispatch_mode = getattr(args, "dispatch_policy", "round_robin")
+	deferred_mode = getattr(args, "deferred_mode", "disabled")
+	worker_cache = getattr(args, "worker_feature_cache", False)
+	worker_cache_bytes = getattr(args, "worker_feature_cache_bytes", 0)
 	aggregates = incremental and (
 		args.incremental_engine == "aggregates" or args.incremental_engine == "auto" and name == "sage"
 	)
@@ -524,6 +641,8 @@ def trial(args, placement, base_graph, base_features, name, method, repetition):
 		coalescing=args.coalescing,
 		gather_inputs=args.gather_inputs,
 		concurrent_compute=args.concurrent_compute,
+		bounded_staleness=deferred_mode != "disabled",
+		worker_feature_cache=worker_cache,
 	)
 	settings = WorkerSettings(
 		switches,
@@ -532,6 +651,7 @@ def trial(args, placement, base_graph, base_features, name, method, repetition):
 		timeout=args.timeout,
 		history_bytes=args.history_bytes,
 		refresh_steps=args.refresh_steps,
+		feature_cache_bytes=worker_cache_bytes,
 		rendezvous_prefix=f"{name}/{method}/{repetition}",
 	)
 	if placement.rank:
@@ -544,6 +664,7 @@ def trial(args, placement, base_graph, base_features, name, method, repetition):
 			settings,
 		)
 		return None
+	phase(args, method, repetition, "setup")
 	# Give each trial its own lazy layout caches and mutable feature state.
 	graph = base_graph.formats("coo").clone().formats(["coo", "csr", "csc"])
 	features = base_features if args.workload == "edges" else base_features.clone()
@@ -565,7 +686,25 @@ def trial(args, placement, base_graph, base_features, name, method, repetition):
 	model = spec.build()
 	changes = max(1, round(graph.num_edges() * args.change_fraction)) if args.change_fraction else args.changes
 	input_identity = inference_identity(graph, features, spec, model=model)
-	identity = hashlib.sha256((input_identity + args.source_fingerprint).encode()).hexdigest()
+	policy_identity = {
+		"dispatch_policy": dispatch_mode,
+		"dispatch_locality_weight": getattr(args, "dispatch_locality_weight", 1.0),
+		"dispatch_load_weight": getattr(args, "dispatch_load_weight", 1.0),
+		"worker_feature_cache": worker_cache,
+		"worker_feature_cache_bytes": worker_cache_bytes,
+		"deferred_mode": deferred_mode,
+		"max_stale_versions": getattr(args, "max_stale_versions", 2),
+		"deferred_window_seconds": getattr(args, "deferred_window_seconds", None),
+		"hotspot_degree_threshold": getattr(args, "hotspot_degree_threshold", None),
+		"hotspot_max_changes": getattr(args, "hotspot_max_changes", None),
+	}
+	identity = hashlib.sha256(
+		(
+			input_identity
+			+ args.source_fingerprint
+			+ json.dumps(policy_identity, sort_keys=True, separators=(",", ":"))
+		).encode()
+	).hexdigest()
 	digest = hashlib.sha256()
 	with ExitStack() as stack:
 		runtime = stack.enter_context(
@@ -577,6 +716,15 @@ def trial(args, placement, base_graph, base_features, name, method, repetition):
 				switches=switches,
 				worker_threads=args.threads,
 				worker_bytes=args.worker_bytes,
+				worker_feature_cache_bytes=worker_cache_bytes,
+				dispatch_mode=dispatch_mode,
+				dispatch_locality_weight=getattr(args, "dispatch_locality_weight", 1.0),
+				dispatch_load_weight=getattr(args, "dispatch_load_weight", 1.0),
+				deferred_mode="version_window" if deferred_mode == "disabled" else deferred_mode,
+				max_stale_versions=getattr(args, "max_stale_versions", 2),
+				deferred_window_seconds=getattr(args, "deferred_window_seconds", None),
+				hotspot_degree_threshold=getattr(args, "hotspot_degree_threshold", None),
+				hotspot_max_changes=getattr(args, "hotspot_max_changes", None),
 				storage_bytes=args.storage_bytes,
 				storage_overlay_bytes=args.storage_overlay_bytes,
 				storage_response_bytes=args.storage_response_bytes,
@@ -596,6 +744,7 @@ def trial(args, placement, base_graph, base_features, name, method, repetition):
 				neighborhood_policy=policy,
 				storage_partitions=args.storage_partitions,
 				storage_directory=str(args.topology_root) if args.topology_root else None,
+				storage_exported_base=str(args.topology_base) if args.topology_base else None,
 			)
 		)
 		frontend = OwnedServicer(runtime.service, runtime.plane.storage.owner)
@@ -612,6 +761,7 @@ def trial(args, placement, base_graph, base_features, name, method, repetition):
 		if args.topology == "mapped":
 			# An independent mutable DGL oracle mirrors actor updates outside RPC timing.
 			graph = graph.clone()
+		phase(args, method, repetition, "initialization")
 		initialization_started = perf_counter()
 		if args.initialization == "all":
 			layers = range(1, spec.layers + 1) if policy.reuse_intermediates else (spec.layers,)
@@ -632,6 +782,10 @@ def trial(args, placement, base_graph, base_features, name, method, repetition):
 			verification_generator,
 		)
 
+		labels, test_mask = load_test_labels(
+			getattr(args, "labels", None), getattr(args, "test_split", None), graph.num_nodes()
+		)
+
 		def check():
 			logging.info("Checking %d oracle rows for %s", verification_nodes.numel(), method)
 			checked = verify(
@@ -645,6 +799,8 @@ def trial(args, placement, base_graph, base_features, name, method, repetition):
 				timeout=args.timeout,
 				nodes=verification_nodes,
 				batch_size=args.verification_batch_size,
+				labels=labels,
+				test_mask=test_mask,
 			)
 			checked["selection"] = (
 				"all rows"
@@ -654,7 +810,9 @@ def trial(args, placement, base_graph, base_features, name, method, repetition):
 			logging.info("Oracle check complete: method=%s max_error=%.6g", method, checked["max_error"])
 			return checked
 
+		phase(args, method, repetition, "initial_verification")
 		checks = [check()]
+		phase(args, method, repetition, "warmup")
 		warmup_requests = []
 		warmup_edge_changes = []
 		for index in range(args.warmup):
@@ -684,6 +842,7 @@ def trial(args, placement, base_graph, base_features, name, method, repetition):
 			logging.info("Warmup %d complete for %s", index + 1, method)
 		# Build the immutable workload and final oracle before the measured window.
 		# Sparse pending rows preserve repeated feature updates without cloning N*F.
+		phase(args, method, repetition, "trace_preparation")
 		preparing = perf_counter()
 		graph = graph.clone()
 		trace, pending, trace_bytes = [], {}, 0
@@ -729,6 +888,7 @@ def trial(args, placement, base_graph, base_features, name, method, repetition):
 			raise AssertionError("Recorded workload differs from the measured request sequence")
 		recording.save(args.output / f"{name}-{method}-{repetition}-workload.pt")
 		profiler = stack.enter_context(RuntimeProfiler(runtime, network_interfaces=args.network_interfaces))
+		phase(args, method, repetition, "measured")
 		profiler.start()
 		rpc_timings.clear()
 		updates, queries = [], []
@@ -744,6 +904,7 @@ def trial(args, placement, base_graph, base_features, name, method, repetition):
 			queries.append(perf_counter() - before)
 		elapsed = perf_counter() - started
 		profile = profiler.stop()
+		phase(args, method, repetition, "final_verification")
 		rpc_report = rpc_timings.report()
 		changed_nodes = []
 		for request, _ in trace:
@@ -762,6 +923,7 @@ def trial(args, placement, base_graph, base_features, name, method, repetition):
 			"identity": identity,
 			"input_identity": input_identity,
 			"trace_digest": digest.hexdigest(),
+			"policy_identity": policy_identity,
 			"workload_counts": {
 				**recording.counts,
 				"effective_edge_changes": {
@@ -801,6 +963,12 @@ def trial(args, placement, base_graph, base_features, name, method, repetition):
 				"reuse_intermediates": policy.reuse_intermediates,
 				"seed": policy.seed,
 			},
+			"dispatch_policy": runtime.service.profile()["dispatch"],
+			"deferred_policy": runtime.service.profile()["deferred"],
+			"worker_feature_cache": {
+				"enabled": worker_cache,
+				"budget_bytes": worker_cache_bytes,
+			},
 			"switches": switches.as_dict(),
 			"correctness": checks,
 			"updates": updates,
@@ -813,7 +981,20 @@ def trial(args, placement, base_graph, base_features, name, method, repetition):
 		}
 		result["metrics"] = measurements(result)
 		result["response_seconds"] = result["metrics"]["response_time"]["mean_seconds"]
+		phase(args, method, repetition, "complete")
 		return result
+
+
+def phase(args, method, repetition, name):
+	"""Publish boundaries outside the measured window for bounded trial supervision."""
+	path = getattr(args, "phase_file", None)
+	if path is not None:
+		path.parent.mkdir(parents=True, exist_ok=True)
+		temporary = path.with_suffix(".tmp")
+		temporary.write_text(
+			json.dumps({"method": method, "repetition": repetition, "phase": name, "time_unix": time.time()}) + "\n"
+		)
+		temporary.replace(path)
 
 
 def _run(args: Options):
@@ -841,7 +1022,9 @@ def _run(args: Options):
 			"trials": [],
 		}
 	for method in args.methods:
-		for repetition in range(args.repetitions):
+		for repetition in range(
+			getattr(args, "repetition_offset", 0), getattr(args, "repetition_offset", 0) + args.repetitions
+		):
 			models = args.models if repetition % 2 == 0 else list(reversed(args.models))
 			for name in models:
 				logging.info("Trial model=%s method=%s repetition=%s rank=%s", name, method, repetition, placement.rank)

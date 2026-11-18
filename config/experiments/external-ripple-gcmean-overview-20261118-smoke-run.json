@@ -1,0 +1,33 @@
+{
+  "id": "external-ripple-gcmean-overview-20261118-smoke-run-v1",
+  "hardware_profile": "external-cpu",
+  "wall_seconds": 3600,
+  "environment": {
+    "OMP_NUM_THREADS": "16",
+    "MKL_NUM_THREADS": "16",
+    "OPENBLAS_NUM_THREADS": "16"
+  },
+  "hash_files": [
+    "config/experiments/external-ripple-gcmean-overview-20261118-smoke.json",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/arxiv-NrtInc-r0/report/sage-NrtInc-0-workload.pt",
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/checkpoints/sage-arxiv.pt"
+  ],
+  "required_files": [
+    "config/experiments/external-ripple-gcmean-overview-20261118-smoke.json",
+    "/tmp/neutronrt-paper-ripple/README.md",
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/arxiv/raw/edge.csv.gz",
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/arxiv/raw/node-feat.csv.gz",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/arxiv-NrtInc-r0/report/sage-NrtInc-0-workload.pt",
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/checkpoints/sage-arxiv.pt"
+  ],
+  "phase_file": "{output}/cohort/phase.json",
+  "command": [
+    "{python}",
+    "-m",
+    "scripts.evaluate.external_cohort",
+    "--plan",
+    "config/experiments/external-ripple-gcmean-overview-20261118-smoke.json",
+    "--output",
+    "{output}/cohort"
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "id": "external-ripple-gcmean-overview-20261118-run-v1",
+  "hardware_profile": "external-cpu",
+  "wall_seconds": 76000,
+  "environment": {
+    "OMP_NUM_THREADS": "16",
+    "MKL_NUM_THREADS": "16",
+    "OPENBLAS_NUM_THREADS": "16"
+  },
+  "hash_files": [
+    "config/experiments/external-ripple-gcmean-overview-20261118-trials.json",
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/checkpoints/sage-arxiv.pt",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/arxiv-NrtInc-r0/report/sage-NrtInc-0-workload.pt",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/arxiv-NrtInc-r1/report/sage-NrtInc-1-workload.pt",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/arxiv-NrtInc-r2/report/sage-NrtInc-2-workload.pt",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/arxiv-NrtInc-r3/report/sage-NrtInc-3-workload.pt",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/arxiv-NrtInc-r4/report/sage-NrtInc-4-workload.pt",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/products-NrtInc-r0/report/sage-NrtInc-0-workload.pt",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/products-NrtInc-r1/report/sage-NrtInc-1-workload.pt",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/products-NrtInc-r2/report/sage-NrtInc-2-workload.pt",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/products-NrtInc-r3/report/sage-NrtInc-3-workload.pt",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/products-NrtInc-r4/report/sage-NrtInc-4-workload.pt"
+  ],
+  "required_files": [
+    "config/experiments/external-ripple-gcmean-overview-20261118-trials.json",
+    "/tmp/neutronrt-paper-ripple/README.md",
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/arxiv/raw/edge.csv.gz",
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/arxiv/raw/node-feat.csv.gz",
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/products/raw/edge.csv.gz",
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/products/raw/node-feat.csv.gz",
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/checkpoints/sage-arxiv.pt",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/arxiv-NrtInc-r0/report/sage-NrtInc-0-workload.pt",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/arxiv-NrtInc-r1/report/sage-NrtInc-1-workload.pt",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/arxiv-NrtInc-r2/report/sage-NrtInc-2-workload.pt",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/arxiv-NrtInc-r3/report/sage-NrtInc-3-workload.pt",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/arxiv-NrtInc-r4/report/sage-NrtInc-4-workload.pt",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/products-NrtInc-r0/report/sage-NrtInc-0-workload.pt",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/products-NrtInc-r1/report/sage-NrtInc-1-workload.pt",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/products-NrtInc-r2/report/sage-NrtInc-2-workload.pt",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/products-NrtInc-r3/report/sage-NrtInc-3-workload.pt",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/products-NrtInc-r4/report/sage-NrtInc-4-workload.pt"
+  ],
+  "phase_file": "{output}/cohort/phase.json",
+  "command": [
+    "{python}",
+    "-m",
+    "scripts.evaluate.external_cohort",
+    "--plan",
+    "config/experiments/external-ripple-gcmean-overview-20261118-trials.json",
+    "--output",
+    "{output}/cohort"
+  ]
+}

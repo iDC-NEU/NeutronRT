@@ -198,9 +198,18 @@ class MemorySampler:
 		self._stop = Event()
 		self._thread: Optional[Thread] = None
 		self.start_bytes = self.peak_bytes = self.end_bytes = self.samples = 0
+		self.errors = 0
+		self.last_error: Optional[str] = None
 
 	def _sample(self) -> None:
-		value = self._read()
+		try:
+			value = int(self._read())
+			if value < 0:
+				raise ValueError("RSS sampler returned a negative byte count")
+		except Exception as error:
+			self.errors += 1
+			self.last_error = f"{type(error).__name__}: {error}"
+			return
 		self.peak_bytes = max(self.peak_bytes, value)
 		self.end_bytes = value
 		self.samples += 1
@@ -210,6 +219,7 @@ class MemorySampler:
 			raise RuntimeError("RSS sampler already started")
 		self._sample()
 		self.start_bytes = self.end_bytes
+		self._stop.clear()
 		self._thread = Thread(target=self._run, name="PROFILE-RSS", daemon=True)
 		self._thread.start()
 
@@ -217,15 +227,26 @@ class MemorySampler:
 		while not self._stop.wait(self.interval):
 			self._sample()
 
-	def stop(self) -> dict:
+	def stop(self, timeout: Optional[float] = None) -> dict:
 		self._stop.set()
+		joined = True
 		if self._thread is not None:
-			self._thread.join()
-		self._sample()
+			join_timeout = max(0.1, min(5.0, self.interval * 4)) if timeout is None else max(0.0, timeout)
+			self._thread.join(join_timeout)
+			joined = not self._thread.is_alive()
+		if joined:
+			self._sample()
 		return {
 			"start_rss_bytes": self.start_bytes,
 			"peak_rss_bytes": self.peak_bytes,
+			"sampled_peak_rss_bytes": self.peak_bytes,
 			"end_rss_bytes": self.end_bytes,
+			"start_bytes": self.start_bytes,
+			"peak_bytes": self.peak_bytes,
+			"end_bytes": self.end_bytes,
 			"samples": self.samples,
+			"sampling_errors": self.errors,
+			"last_sampling_error": self.last_error,
 			"interval_seconds": self.interval,
+			"sampler_stopped": joined,
 		}

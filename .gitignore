@@ -11,7 +11,11 @@ __pycache__/
 .ruff_cache/
 cache/
 .vscode/
-config/
+/config/*
+!/config/experiments/
+/config/experiments/*
+!/config/experiments/*.json
+!/config/experiments/README.md
 credentials/
 credentials.*
 secrets/

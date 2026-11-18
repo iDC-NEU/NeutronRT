@@ -68,21 +68,22 @@ class AggregateOnly:
 	def reconstruct(self, nodes: Tensor, layer: int, stack: ExitStack) -> Tensor:
 		service, plane = self.service, self.plane
 		self.ensure_prefix(nodes, layer)
-		worker = service._pick()
-		plane.make_room(worker.owner, nodes.numel() * service.widths[layer] * 4)
-		start = next(
-			(
-				prefix
-				for prefix in range(layer - 1, 0, -1)
-				if service.catalog.available(prefix, nodes, service.catalog.version).all()
-			),
-			0,
-		)
-		tables = self.tables(nodes, layer, worker.owner, start=start)
-		key = service.catalog.reserve(layer, nodes, service.catalog.version)
+		worker = service._pick(required=nodes, input_layer=layer - 1, task_cost=max(1, nodes.numel()))
+		key = None
 		published = False
 		obsolete: Tuple[StateKey, ...] = ()
 		try:
+			plane.make_room(worker.owner, nodes.numel() * service.widths[layer] * 4)
+			start = next(
+				(
+					prefix
+					for prefix in range(layer - 1, 0, -1)
+					if service.catalog.available(prefix, nodes, service.catalog.version).all()
+				),
+				0,
+			)
+			tables = self.tables(nodes, layer, worker.owner, start=start)
+			key = service.catalog.reserve(layer, nodes, service.catalog.version)
 			attempt = plane.directory.begin(key, worker.owner)
 			packet = pack_reconstruction(
 				attempt, service.widths, tables, service.graph.in_degrees(nodes), start_layer=start
@@ -101,11 +102,12 @@ class AggregateOnly:
 			service.counters.reconstructed_rows += nodes.numel()
 			return plane.read_rows(key, torch.arange(nodes.numel()), stack)
 		finally:
-			if not published:
+			if key is not None and not published:
 				service.catalog.cancel(key)
 				plane.retire(key)
 			for retired in obsolete:
 				plane.retire(retired)
+			service._release_dispatch(worker)
 
 	def load(self, layer: int, nodes: Tensor, owner: Owner, stack: ExitStack) -> Tensor:
 		service = self.service

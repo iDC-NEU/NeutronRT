@@ -1,0 +1,9 @@
+{
+  "after_tasks": [
+    "5ee08a405f68",
+    "06a9a451de5f"
+  ],
+  "manifest": "config/experiments/papers100m-prepare.json",
+  "output": "/mnt/nfs0/lvhr/neutronrt-results/preparation/papers100m-20261116-v1",
+  "hardware": "config/experiments/hardware.json"
+}

@@ -1,0 +1,27 @@
+{
+  "id": "common-baselines-gpu-20261116-v1",
+  "hardware_profile": "baseline-gpu",
+  "wall_seconds": 290000,
+  "environment": {
+    "OMP_NUM_THREADS": "8",
+    "MKL_NUM_THREADS": "8",
+    "OPENBLAS_NUM_THREADS": "8"
+  },
+  "hash_files": [
+    "config/experiments/common-baselines-gpu-trials.json",
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/checkpoints/sage-arxiv.pt"
+  ],
+  "required_files": [
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/arxiv/raw/edge.csv.gz",
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/products/raw/edge.csv.gz",
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/checkpoints/sage-arxiv.pt"
+  ],
+  "command": [
+    "{python}",
+    "-m",
+    "scripts.evaluate.cohort",
+    "config/experiments/common-baselines-gpu-trials.json",
+    "--output",
+    "{output}/cohort"
+  ]
+}

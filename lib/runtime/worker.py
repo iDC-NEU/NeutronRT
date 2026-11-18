@@ -77,17 +77,25 @@ class OwnedWorker:
 		operator_incremental: bool = False,
 		mapped_host_reads: bool = False,
 		history_bytes: int = 256 * 1024**2,
+		feature_cache_bytes: int = 0,
 		refresh_steps: int = 32,
 	) -> None:
 		if owner.rank != comm.rank or owner.generation < 1:
 			raise ValueError("Owned worker identity does not match its communicator")
 		if model.model_name not in MODEL_NAMES:
 			raise ValueError(f"Unsupported worker model: {model.model_name}")
+		if type(feature_cache_bytes) is not int or feature_cache_bytes < 0:
+			raise ValueError("Feature-row cache budget must be a nonnegative integer")
+		if feature_cache_bytes:
+			raise NotImplementedError(
+				"Feature-row reuse is fail-closed until the wire protocol can avoid sending cache hits"
+			)
 		self.comm, self.model, self.owner = comm, model.eval(), owner
 		self.control_epoch = control_epoch
 		self.coalesced = coalesced
 		self.gather_inputs = gather_inputs
 		self.incremental = None
+		self.feature_cache = None
 		if operator_incremental:
 			from lib.models.incremental import IncrementalLayers
 
@@ -452,6 +460,16 @@ class OwnedWorker:
 
 	def handle_extra(self, header: Tensor) -> bool:
 		return False
+
+	def profile(self) -> dict:
+		return {
+			"owner": {"rank": self.owner.rank, "generation": self.owner.generation},
+			"feature_cache": {
+				"enabled": False,
+				"budget_bytes": 0,
+				"status": "disabled",
+			},
+		}
 
 	def run(self) -> None:
 		try:

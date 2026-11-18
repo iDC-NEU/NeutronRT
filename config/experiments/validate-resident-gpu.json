@@ -1,0 +1,9 @@
+{
+  "id": "resident-four-method-cuda-correctness-v1",
+  "purpose": "GPU fixture correctness only, not paper performance",
+  "hardware_profile": "peer-gpu",
+  "wall_seconds": 300,
+  "required_files": ["tests/evaluate/test_resident_gpu.py"],
+  "environment": {"NEUTRONRT_RUN_GPU_TESTS": "1", "OMP_NUM_THREADS": "4", "MKL_NUM_THREADS": "4", "OPENBLAS_NUM_THREADS": "4"},
+  "command": ["{python}", "-m", "pytest", "-m", "gpu", "-q", "tests/evaluate/test_resident_gpu.py"]
+}

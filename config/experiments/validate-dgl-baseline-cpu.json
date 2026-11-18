@@ -1,0 +1,20 @@
+{
+  "id": "dedicated-dgl-baseline-cpu-validation-v1",
+  "purpose": "Integration validation only; not paper performance evidence",
+  "hardware_profile": "peer-cpu",
+  "wall_seconds": 300,
+  "environment": {
+    "CUDA_VISIBLE_DEVICES": "",
+    "OMP_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1"
+  },
+  "command": [
+    "{python}", "-m", "pytest",
+    "tests/evaluate/test_dgl.py",
+    "tests/validate/test_dgl_baselines.py",
+    "tests/validate/test_baseline_boundary.py",
+    "tests/test_architecture.py",
+    "-q", "--tb=short"
+  ]
+}

@@ -94,10 +94,30 @@ class WaitRequest(_message.Message):
 	POLL_FIELD_NUMBER: _ClassVar[int]
 	ticket: Ticket
 	poll: bool
-	def __init__(self, ticket: _Optional[_Union[Ticket, _Mapping]] = ..., poll: bool = ...) -> None: ...
+	def __init__(self, ticket: _Optional[_Union[Ticket, _Mapping]] = ..., poll: _Optional[bool] = ...) -> None: ...
 
 class Completion(_message.Message):
-	__slots__ = ("ticket", "ready", "version", "affected", "input_changes", "model_tasks", "input_version")
+	__slots__ = (
+		"ticket",
+		"ready",
+		"version",
+		"affected",
+		"input_changes",
+		"model_tasks",
+		"input_version",
+		"admitted_at_ns",
+		"execution_started_at_ns",
+		"staged_at_ns",
+		"publication_observed_at_ns",
+		"completion_at_ns",
+		"server_reply_prepared_at_ns",
+		"queue_wait_ns",
+		"execution_ns",
+		"delayed_publication_wait_ns",
+		"timestamp_scope",
+		"publication_source",
+		"state",
+	)
 	TICKET_FIELD_NUMBER: _ClassVar[int]
 	READY_FIELD_NUMBER: _ClassVar[int]
 	VERSION_FIELD_NUMBER: _ClassVar[int]
@@ -105,6 +125,18 @@ class Completion(_message.Message):
 	INPUT_CHANGES_FIELD_NUMBER: _ClassVar[int]
 	MODEL_TASKS_FIELD_NUMBER: _ClassVar[int]
 	INPUT_VERSION_FIELD_NUMBER: _ClassVar[int]
+	ADMITTED_AT_NS_FIELD_NUMBER: _ClassVar[int]
+	EXECUTION_STARTED_AT_NS_FIELD_NUMBER: _ClassVar[int]
+	STAGED_AT_NS_FIELD_NUMBER: _ClassVar[int]
+	PUBLICATION_OBSERVED_AT_NS_FIELD_NUMBER: _ClassVar[int]
+	COMPLETION_AT_NS_FIELD_NUMBER: _ClassVar[int]
+	SERVER_REPLY_PREPARED_AT_NS_FIELD_NUMBER: _ClassVar[int]
+	QUEUE_WAIT_NS_FIELD_NUMBER: _ClassVar[int]
+	EXECUTION_NS_FIELD_NUMBER: _ClassVar[int]
+	DELAYED_PUBLICATION_WAIT_NS_FIELD_NUMBER: _ClassVar[int]
+	TIMESTAMP_SCOPE_FIELD_NUMBER: _ClassVar[int]
+	PUBLICATION_SOURCE_FIELD_NUMBER: _ClassVar[int]
+	STATE_FIELD_NUMBER: _ClassVar[int]
 	ticket: Ticket
 	ready: bool
 	version: int
@@ -112,15 +144,39 @@ class Completion(_message.Message):
 	input_changes: int
 	model_tasks: int
 	input_version: int
+	admitted_at_ns: int
+	execution_started_at_ns: int
+	staged_at_ns: int
+	publication_observed_at_ns: int
+	completion_at_ns: int
+	server_reply_prepared_at_ns: int
+	queue_wait_ns: int
+	execution_ns: int
+	delayed_publication_wait_ns: int
+	timestamp_scope: str
+	publication_source: str
+	state: str
 	def __init__(
 		self,
 		ticket: _Optional[_Union[Ticket, _Mapping]] = ...,
-		ready: bool = ...,
+		ready: _Optional[bool] = ...,
 		version: _Optional[int] = ...,
 		affected: _Optional[_Iterable[int]] = ...,
 		input_changes: _Optional[int] = ...,
 		model_tasks: _Optional[int] = ...,
 		input_version: _Optional[int] = ...,
+		admitted_at_ns: _Optional[int] = ...,
+		execution_started_at_ns: _Optional[int] = ...,
+		staged_at_ns: _Optional[int] = ...,
+		publication_observed_at_ns: _Optional[int] = ...,
+		completion_at_ns: _Optional[int] = ...,
+		server_reply_prepared_at_ns: _Optional[int] = ...,
+		queue_wait_ns: _Optional[int] = ...,
+		execution_ns: _Optional[int] = ...,
+		delayed_publication_wait_ns: _Optional[int] = ...,
+		timestamp_scope: _Optional[str] = ...,
+		publication_source: _Optional[str] = ...,
+		state: _Optional[str] = ...,
 	) -> None: ...
 
 class QueryRequest(_message.Message):
@@ -171,6 +227,8 @@ class RuntimeInfo(_message.Message):
 		"uptime_seconds",
 		"incomplete_version",
 		"max_staleness",
+		"admitted_updates",
+		"pending_update_bytes",
 	)
 	SESSION_FIELD_NUMBER: _ClassVar[int]
 	NODES_FIELD_NUMBER: _ClassVar[int]
@@ -185,6 +243,8 @@ class RuntimeInfo(_message.Message):
 	UPTIME_SECONDS_FIELD_NUMBER: _ClassVar[int]
 	INCOMPLETE_VERSION_FIELD_NUMBER: _ClassVar[int]
 	MAX_STALENESS_FIELD_NUMBER: _ClassVar[int]
+	ADMITTED_UPDATES_FIELD_NUMBER: _ClassVar[int]
+	PENDING_UPDATE_BYTES_FIELD_NUMBER: _ClassVar[int]
 	session: str
 	nodes: int
 	widths: _containers.RepeatedScalarFieldContainer[int]
@@ -198,6 +258,8 @@ class RuntimeInfo(_message.Message):
 	uptime_seconds: float
 	incomplete_version: int
 	max_staleness: int
+	admitted_updates: int
+	pending_update_bytes: int
 	def __init__(
 		self,
 		session: _Optional[str] = ...,
@@ -213,4 +275,6 @@ class RuntimeInfo(_message.Message):
 		uptime_seconds: _Optional[float] = ...,
 		incomplete_version: _Optional[int] = ...,
 		max_staleness: _Optional[int] = ...,
+		admitted_updates: _Optional[int] = ...,
+		pending_update_bytes: _Optional[int] = ...,
 	) -> None: ...

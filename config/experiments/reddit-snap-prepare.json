@@ -1,0 +1,21 @@
+{
+  "id": "reddit-snap-prepare-v1",
+  "hardware_profile": "prepare-reddit",
+  "wall_seconds": 3600,
+  "environment": {
+    "CUDA_VISIBLE_DEVICES": "",
+    "OMP_NUM_THREADS": "4",
+    "MKL_NUM_THREADS": "4",
+    "OPENBLAS_NUM_THREADS": "4"
+  },
+  "command": [
+    "{python}",
+    "-m",
+    "scripts.download_datasets",
+    "reddit",
+    "--root",
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/revision-datasets-proxy",
+    "--connections",
+    "1"
+  ]
+}

@@ -90,12 +90,28 @@ class WorkerSettings:
 	timeout: float = 30
 	profile_dir: Optional[str] = None
 	history_bytes: int = 256 * 1024**2
+	feature_cache_bytes: int = 0
 	refresh_steps: int = 32
 	checkpoint: Optional[str] = None
 	rendezvous_prefix: Optional[str] = None
 
 	def __post_init__(self):
-		if self.threads < 1 or self.timeout <= 0 or self.history_bytes < 0 or self.refresh_steps < 1:
+		if self.switches.worker_feature_cache:
+			raise NotImplementedError(
+				"worker_feature_cache requires a miss-only version/generation-certified transport protocol"
+			)
+		if (
+			self.threads < 1
+			or self.timeout <= 0
+			or self.history_bytes < 0
+			or type(self.feature_cache_bytes) is not int
+			or self.feature_cache_bytes < 0
+			or self.switches.worker_feature_cache
+			and self.feature_cache_bytes < 1
+			or not self.switches.worker_feature_cache
+			and self.feature_cache_bytes
+			or self.refresh_steps < 1
+		):
 			raise ValueError("Invalid worker threads, timeout or history budget")
 		if self.backend not in ("auto", "gloo"):
 			raise ValueError("CPU storage requires a CPU-capable control backend: auto or gloo")
@@ -134,6 +150,7 @@ def join_world(
 			spec.kernels,
 			spec.seed,
 			settings.switches.mask,
+			settings.feature_cache_bytes,
 		)
 		peers: list[Any] = [None] * world_size
 		dist.all_gather_object(peers, (str(device), generation, max_bytes, identity))
@@ -187,6 +204,7 @@ def run_worker(
 		operator_incremental=settings.switches.operator_incremental,
 		mapped_host_reads=settings.switches.mapped_host_reads,
 		history_bytes=settings.history_bytes,
+		feature_cache_bytes=settings.feature_cache_bytes,
 		refresh_steps=settings.refresh_steps,
 		**kwargs,
 	).run()

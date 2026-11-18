@@ -26,8 +26,10 @@ def prepare_edges(
 	expected_edges: int | None = None,
 	limit_edges: int | None = None,
 	source_sha256: str | None = None,
+	compact_ids: bool = False,
+	undirected: bool = False,
 ) -> dict:
-	"""Preserve directed edges, duplicates, self loops and numeric source IDs.
+	"""Preserve directed edges, duplicates and self loops with explicit ID policy.
 
 	Only one input chunk and a bounded feature chunk are resident. Features are
 	explicitly synthetic: an unlabelled topology is not a classification dataset.
@@ -45,7 +47,7 @@ def prepare_edges(
 	digest = source_sha256 or file_sha256(source)
 	with tempfile.TemporaryDirectory(prefix=".prepare-", dir=destination.parent) as temporary:
 		folder = Path(temporary)
-		count, maximum, self_loops = 0, -1, 0
+		count, input_count, maximum, self_loops = 0, 0, -1, 0
 		edge_hashes = [hashlib.sha256(), hashlib.sha256()]
 		with (folder / "sources.i64").open("wb") as sources, (folder / "targets.i64").open("wb") as targets:
 			reader = pd.read_csv(source, sep=r"\s+", header=None, comment="#", dtype=np.int64, chunksize=chunk_edges)
@@ -54,26 +56,63 @@ def prepare_edges(
 					if frame.shape[1] != 2:
 						raise ValueError("An edge list must have exactly two integer columns")
 					if limit_edges is not None:
-						frame = frame.iloc[: limit_edges - count]
+						frame = frame.iloc[: limit_edges - input_count]
 					values = frame.to_numpy(copy=False)
 					if values.size:
-						if values.min() < 0 or nodes is not None and values.max() >= nodes:
+						if values.min() < 0 or not compact_ids and nodes is not None and values.max() >= nodes:
 							raise ValueError("Edge node ID is outside the declared graph")
 						maximum = max(maximum, int(values.max()))
 						self_loops += int(np.count_nonzero(values[:, 0] == values[:, 1]))
+					input_count += len(frame)
+					if undirected:
+						values = np.concatenate((values, values[values[:, 0] != values[:, 1], ::-1]))
 					for index, stream in enumerate((sources, targets)):
 						column = np.ascontiguousarray(values[:, index], dtype="<i8")
 						stream.write(memoryview(column).cast("B"))
 						edge_hashes[index].update(memoryview(column).cast("B"))
-					count += len(frame)
+					count += len(values)
 					logging.info("Prepared %d edges", count)
-					if limit_edges is not None and count >= limit_edges:
+					if limit_edges is not None and input_count >= limit_edges:
 						break
 		if not count:
 			raise ValueError("The edge list contains no edges")
-		if limit_edges is None and expected_edges is not None and count != expected_edges:
-			raise ValueError(f"Expected {expected_edges} edges; parsed {count}")
-		node_count = nodes if nodes is not None else maximum + 1
+		if limit_edges is None and expected_edges is not None and input_count != expected_edges:
+			raise ValueError(f"Expected {expected_edges} input edges; parsed {input_count}")
+		if compact_ids:
+			# Numeric source IDs can have gaps (e.g. SNAP Friendster). Preserve
+			# a reversible sorted mapping without a Python set of all endpoints.
+			seen = np.lib.format.open_memmap(folder / "seen.npy", mode="w+", dtype=np.bool_, shape=(maximum + 1,))
+			seen[:] = False
+			for name in ("sources.i64", "targets.i64"):
+				endpoints = np.memmap(folder / name, mode="r", dtype="<i8", shape=(count,))
+				for start in range(0, count, chunk_edges):
+					seen[endpoints[start : start + chunk_edges]] = True
+				del endpoints
+			mapping = np.lib.format.open_memmap(folder / "mapping.npy", mode="w+", dtype="<i8", shape=(maximum + 1,))
+			node_count = 0
+			with (folder / "original_ids.i64").open("wb") as original:
+				for start in range(0, maximum + 1, chunk_edges):
+					flags = seen[start : start + chunk_edges]
+					mapping[start : start + len(flags)] = np.cumsum(flags, dtype=np.int64) - 1 + node_count
+					ids = np.asarray(np.flatnonzero(flags) + start, dtype="<i8")
+					original.write(ids.tobytes())
+					node_count += len(ids)
+			if nodes is not None and node_count != nodes:
+				raise ValueError(f"Expected {nodes} distinct nodes; parsed {node_count}")
+			for index, name in enumerate(("sources.i64", "targets.i64")):
+				endpoints = np.memmap(folder / name, mode="r+", dtype="<i8", shape=(count,))
+				edge_hashes[index] = hashlib.sha256()
+				for start in range(0, count, chunk_edges):
+					values = np.asarray(mapping[endpoints[start : start + chunk_edges]])
+					endpoints[start : start + len(values)] = values
+					edge_hashes[index].update(values.tobytes())
+				endpoints.flush()
+				del endpoints
+			del seen, mapping
+			(folder / "seen.npy").unlink()
+			(folder / "mapping.npy").unlink()
+		else:
+			node_count = nodes if nodes is not None else maximum + 1
 		features = np.lib.format.open_memmap(
 			folder / "features.npy", mode="w+", dtype=np.float32, shape=(node_count, feature_dim)
 		)
@@ -88,7 +127,11 @@ def prepare_edges(
 		manifest = {
 			"schema": SCHEMA,
 			"nodes": node_count,
+			"node_id_policy": "sorted-compact" if compact_ids else "source-numeric",
+			"original_ids": "original_ids.i64" if compact_ids else None,
 			"edges": count,
+			"input_edges": input_count,
+			"source_undirected": undirected,
 			"self_loops": self_loops,
 			"directed": True,
 			"edge_dtype": "<i8",

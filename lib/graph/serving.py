@@ -17,6 +17,7 @@ from lib.graph.data_plane import LocalEmbeddingPlane, LocalEndpoint
 from lib.graph.neighborhood import NeighborhoodPolicy
 from lib.graph.ownership import ComputeAttempt, Owner, StateKey
 from lib.graph.pipeline import PipelineTiming, execute_layer_pipeline
+from lib.graph.policies import DispatchPolicy, FallbackCounters
 from lib.graph.recompute import LayerPlan, RecomputePlan, RecomputePlanner, execute_recomputation
 
 if TYPE_CHECKING:
@@ -137,6 +138,8 @@ class EmbeddingService(Generic[Endpoint]):
 		preemption_enabled: bool = True,
 		frontier_expander: Optional[Callable[[Tensor, Tensor], Tensor]] = None,
 		neighborhood_policy: Optional[NeighborhoodPolicy] = None,
+		dispatch_policy: Optional[DispatchPolicy] = None,
+		worker_feature_cache_bytes: int = 0,
 	) -> None:
 		if features.device.type != "cpu" or features.ndim != 2 or features.shape[0] != graph.num_nodes():
 			raise ValueError("Storage requires one CPU feature row per graph node")
@@ -146,6 +149,12 @@ class EmbeddingService(Generic[Endpoint]):
 			raise ValueError("Need distinct live compute endpoints")
 		if prefetch_edges < 0:
 			raise ValueError("Prefetch edge budget must be nonnegative")
+		if type(worker_feature_cache_bytes) is not int or worker_feature_cache_bytes < 0:
+			raise ValueError("Worker feature cache budget must be a nonnegative integer")
+		if worker_feature_cache_bytes:
+			raise NotImplementedError(
+				"Worker feature-row reuse is fail-closed until miss-only transport is implemented"
+			)
 		self.graph = graph
 		self.features = features
 		self.widths = tuple(widths)
@@ -177,6 +186,10 @@ class EmbeddingService(Generic[Endpoint]):
 		self._pending_update: Optional[_PendingUpdate] = None
 		self._last_update: Optional[UpdateResult] = None
 		self.deferred: Optional[DeferredUpdates] = None
+		self.dispatch_policy = dispatch_policy or DispatchPolicy()
+		self.worker_feature_cache_bytes = worker_feature_cache_bytes
+		self.fallbacks = FallbackCounters()
+		self._dispatch_reservations: Dict[Owner, List[int]] = {}
 
 	def _state_catalogs(self) -> Tuple[EmbeddingCatalog, ...]:
 		return (self.catalog, *self._additional_catalogs)
@@ -204,12 +217,77 @@ class EmbeddingService(Generic[Endpoint]):
 		for catalog in pending:
 			catalog.finish_analysis(layer, dirty, version)
 
-	def _pick(self) -> Endpoint:
-		if not self.workers:
+	def _locality_rows(self, nodes: Tensor, input_layer: int) -> Dict[Owner, int]:
+		if input_layer <= 0 or not nodes.numel():
+			return {}
+		available = self.catalog.available(input_layer, nodes, self.catalog.version)
+		if not available.any():
+			return {}
+		nodes = nodes[available]
+		rows: Dict[Owner, int] = {}
+		for group in self.catalog.selections(input_layer, nodes, self.catalog.version):
+			owner = self.plane.directory.locate(group.key).owner
+			rows[owner] = rows.get(owner, 0) + group.rows.numel()
+		return rows
+
+	def _pick(
+		self,
+		*,
+		required: Optional[Tensor] = None,
+		input_layer: int = 0,
+		task_cost: Optional[int] = None,
+		candidates: Optional[Sequence[Endpoint]] = None,
+	) -> Endpoint:
+		workers = self.workers if candidates is None else list(candidates)
+		if not workers:
 			raise RuntimeError("No live compute endpoints")
-		worker = self.workers[self._next % len(self.workers)]
-		self._next += 1
-		return worker
+		required = required if required is not None else torch.empty(0, dtype=torch.int64)
+		cost = max(1, required.numel()) if task_cost is None else task_cost
+		locality_rows = None
+		if self.dispatch_policy.mode != "round_robin":
+			locality_rows = self._locality_rows(required, input_layer)
+		choice = self.dispatch_policy.choose(
+			workers,
+			locality_rows=locality_rows,
+			total_rows=required.numel(),
+			task_cost=cost,
+		)
+		self._dispatch_reservations.setdefault(choice.worker.owner, []).append(choice.reserved_cost)
+		return choice.worker
+
+	def _adjust_dispatch(self, worker: Endpoint, actual_cost: int) -> None:
+		reservations = self._dispatch_reservations.get(worker.owner)
+		if not reservations:
+			raise RuntimeError("Dispatch task was not reserved")
+		reserved = reservations[-1]
+		self.dispatch_policy.adjust(worker.owner, reserved, actual_cost)
+		reservations[-1] = actual_cost
+
+	def _release_dispatch(self, worker: Endpoint) -> None:
+		reservations = self._dispatch_reservations.get(worker.owner)
+		if not reservations:
+			raise RuntimeError("Dispatch task was not reserved")
+		reserved = reservations.pop()
+		self.dispatch_policy.release(worker.owner, reserved)
+		if not reservations:
+			self._dispatch_reservations.pop(worker.owner, None)
+
+	@staticmethod
+	def _task_cost(task: LayerPlan) -> int:
+		return int(max(1, task.targets.numel() + task.block.num_edges()))
+
+	def profile(self) -> dict:
+		return {
+			"counters": {name: value for name, value in vars(self.counters).items() if type(value) is int},
+			"dispatch": self.dispatch_policy.profile(),
+			"worker_feature_cache": {
+				"enabled": False,
+				"budget_bytes": self.worker_feature_cache_bytes,
+				"status": "disabled" if not self.worker_feature_cache_bytes else "unsupported_miss_only_protocol",
+			},
+			"fallback_reasons": self.fallbacks.as_dict(),
+			"deferred": self.deferred.profile() if self.deferred is not None else None,
+		}
 
 	def _load(
 		self,
@@ -255,24 +333,31 @@ class EmbeddingService(Generic[Endpoint]):
 		pending: List[StateKey] = []
 		attempts: Dict[StateKey, ComputeAttempt] = {}
 		worker = self.workers[0] if self.workers else None
+		reserved_cost: Optional[int] = None
 		with ExitStack() as stack:
 
 			def load(input_layer: int, required: Tensor, requested: int) -> Tensor:
-				nonlocal worker
+				nonlocal worker, reserved_cost
 				if requested != self.catalog.version:
 					raise ValueError("Graph version changed during execution")
-				worker = self._pick()
+				worker = self._pick(required=required, input_layer=input_layer, task_cost=max(1, required.numel()))
+				reserved_cost = max(1, required.numel())
 				return self._load(input_layer, required, worker.owner, stack)
 
 			def apply(task: LayerPlan, inputs: Tensor) -> Tensor:
+				nonlocal reserved_cost
 				if worker is None:
 					raise RuntimeError("No compute endpoint selected")
+				actual_cost = self._task_cost(task)
+				self._adjust_dispatch(worker, actual_cost)
+				reserved_cost = actual_cost
 				key = self.catalog.reserve(task.layer, task.targets, version)
 				pending.append(key)
 				attempts[key] = self.plane.directory.begin(key, worker.owner)
 				return self.apply(worker, task, inputs)
 
 			def publish(output_layer: int, output_nodes: Tensor, values: Tensor, requested: int) -> None:
+				nonlocal reserved_cost
 				if worker is None or requested != self.catalog.version:
 					raise ValueError("Publication graph version changed during execution")
 				if values.shape[1] != self.widths[output_layer] or values.dtype != self.features.dtype:
@@ -285,6 +370,8 @@ class EmbeddingService(Generic[Endpoint]):
 				del attempts[key]
 				self.counters.tasks += 1
 				self.counters.rows += output_nodes.numel()
+				self._release_dispatch(worker)
+				reserved_cost = None
 				for retired in obsolete:
 					self.plane.retire(retired)
 
@@ -294,6 +381,8 @@ class EmbeddingService(Generic[Endpoint]):
 				for key in pending:
 					self.catalog.cancel(key)
 					self.plane.retire(key)
+				if worker is not None and reserved_cost is not None:
+					self._release_dispatch(worker)
 
 	def _ensure_rows(self, nodes: Tensor, layer: int) -> None:
 		"""Caller holds the graph fence, including on the pipeline coordinator thread."""

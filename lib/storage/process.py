@@ -92,9 +92,11 @@ def _actor(connection, base, start, stop, overlay_bytes, response_bytes, profili
 						"torch_loaded": torch_module is not None,
 						"cuda_initialized": bool(torch_module and torch_module.cuda.is_initialized()),
 					}
+				elif command == "rss":
+					result = {"rss_bytes": int(psutil.Process().memory_info().rss)}
 				else:
 					raise ValueError("Unknown local storage operation")
-				if profiling and command != "stats":
+				if profiling and command not in ("stats", "rss"):
 					operations[command] = operations.get(command, 0) + 1
 					seconds[command] = seconds.get(command, 0.0) + perf_counter() - started
 				connection.send((True, result))
@@ -230,6 +232,11 @@ class LocalStorage:
 	def stats(self):
 		with self.locked(range(len(self.processes))):
 			return self.exchange(dict.fromkeys(range(len(self.processes)), ("stats",)))
+
+	def sample_rss(self, *, timeout=None):
+		"""Read only RSS for a profile sampler; avoid a full stats payload per tick."""
+		with self.locked(range(len(self.processes))):
+			return self.exchange(dict.fromkeys(range(len(self.processes)), ("rss",)))
 
 	def close(self):
 		if self.closed:

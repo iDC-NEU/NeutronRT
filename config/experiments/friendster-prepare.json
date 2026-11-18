@@ -1,0 +1,21 @@
+{
+  "id": "friendster-prepare-v1",
+  "hardware_profile": "prepare-friendster",
+  "wall_seconds": 14400,
+  "environment": {
+    "CUDA_VISIBLE_DEVICES": "",
+    "OMP_NUM_THREADS": "4",
+    "MKL_NUM_THREADS": "4",
+    "OPENBLAS_NUM_THREADS": "4"
+  },
+  "command": [
+    "{python}",
+    "-m",
+    "scripts.download_datasets",
+    "friendster",
+    "--root",
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/revision-datasets-proxy/friendster",
+    "--connections",
+    "1"
+  ]
+}

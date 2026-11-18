@@ -1,11 +1,13 @@
 """Copy a committed revision into a fresh remote worktree, preserving existing checkouts."""
 
+import hashlib
 import json
 import shlex
 import subprocess
 import tempfile
 from pathlib import Path
 from typing import Annotated
+from uuid import uuid4
 
 import typer
 from attrs import define
@@ -18,12 +20,20 @@ class SyncTarget:
 	destination: str
 
 
-def sync(target: SyncTarget, revision: str) -> dict:
+def sync(target: SyncTarget, revision: str, *, working_tree: bool = False) -> dict:
 	ref = subprocess.check_output(["git", "rev-parse", "--symbolic-full-name", revision], text=True).strip()
 	if not ref.startswith("refs/heads/"):
 		raise ValueError("Sync a local branch so the bundle retains a named revision")
 	commit = subprocess.check_output(["git", "rev-parse", ref], text=True).strip()
-	branch = f"sync/{ref.removeprefix('refs/heads/')}/{commit[:12]}"
+	if working_tree:
+		head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+		if head != commit:
+			raise ValueError("--working-tree requires the selected revision to equal HEAD")
+		untracked = subprocess.check_output(["git", "ls-files", "--others", "--exclude-standard"], text=True)
+		if untracked.strip():
+			raise ValueError("Mark intended new files with git add -N before working-tree sync; untracked files remain")
+	patch = subprocess.check_output(["git", "diff", "--binary", "HEAD"]) if working_tree else b""
+	branch = f"sync/{ref.removeprefix('refs/heads/')}/{commit[:12]}-{uuid4().hex[:8]}"
 	# No checkout, reset, clean, stash, or force update touches the remote's current branch.
 	remote = """
 import json,pathlib,subprocess,sys,tempfile
@@ -59,7 +69,23 @@ with tempfile.TemporaryDirectory(prefix='neutronrt-sync-') as folder:
 				text=False,
 				check=True,
 			)
-	return {"host": target.host, **json.loads(result.stdout)}
+	if patch:
+		subprocess.run(
+			[
+				"ssh",
+				"-oBatchMode=yes",
+				"-oConnectTimeout=15",
+				target.host,
+				shlex.join(["git", "-C", target.destination, "apply", "-"]),
+			],
+			input=patch,
+			check=True,
+		)
+	return {
+		"host": target.host,
+		**json.loads(result.stdout),
+		"working_tree_patch_sha256": hashlib.sha256(patch).hexdigest() if patch else None,
+	}
 
 
 def main(
@@ -67,9 +93,12 @@ def main(
 	repository: Annotated[str, typer.Option(help="Existing remote Git repository")],
 	destination: Annotated[str, typer.Option(help="New remote worktree path")],
 	revision: str = "HEAD",
+	working_tree: bool = False,
 ):
-	"""Sync committed code; uncommitted files and logs are never transferred."""
-	typer.echo(json.dumps(sync(SyncTarget(host, repository, destination), revision), indent=2))
+	"""Sync code into a new worktree; optionally apply the HEAD diff (including intent-to-add files)."""
+	typer.echo(
+		json.dumps(sync(SyncTarget(host, repository, destination), revision, working_tree=working_tree), indent=2)
+	)
 
 
 if __name__ == "__main__":

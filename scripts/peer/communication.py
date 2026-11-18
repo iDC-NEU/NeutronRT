@@ -26,12 +26,65 @@ import torch
 import typer
 from torch import distributed as dist
 
+from scripts.peer.allocation import AllocationMetadataError, validate_allocation_capacity
+from scripts.peer.scheduler import Allocation, NeuSbox, ResourceRequest
+
 app = typer.Typer(no_args_is_help=True, pretty_exceptions_show_locals=False)
 
 RESULT_MARKER = "NEUTRONRT_PEER_RESULT="
 DEFAULT_SIZES = (1024, 4096, 65536, 1048576, 16777216)
 TORCH_MODES = ("gloo-cpu", "nccl-gpu", "nccl-staged")
 RDMA_MODES = ("rdma-host", "rdma-gpu")
+
+
+def _resource_request(
+	mode: str,
+	*,
+	cpu_cpus: int = 4,
+	cpu_memory_gib: int = 8,
+	gpu_cpus: int = 4,
+	gpu_memory_gib: int = 16,
+) -> ResourceRequest:
+	if mode in TORCH_MODES + RDMA_MODES:
+		gpu = mode in ("nccl-gpu", "nccl-staged", "rdma-gpu")
+	else:
+		raise ValueError(f"Unsupported peer mode: {mode}")
+	return ResourceRequest(
+		cpu=gpu_cpus if gpu else cpu_cpus,
+		memory_gib=gpu_memory_gib if gpu else cpu_memory_gib,
+		gpus=1 if gpu else 0,
+	)
+
+
+def _worker_execution_command(command: list[str], *, gpu: bool, python: str) -> list[str]:
+	if gpu:
+		return [python, "-m", "scripts.peer.gpu_exec", "--", *command]
+	return command
+
+
+def _scheduler_worker_command(command: list[str], *, gpu: bool, python: str) -> str:
+	return "exec " + shlex.join(_worker_execution_command(command, gpu=gpu, python=python))
+
+
+def _run_local_worker(command: list[str], *, cwd: Path, timeout: float, log_path: Path, label: str) -> str:
+	try:
+		completed = subprocess.run(
+			command,
+			cwd=cwd,
+			capture_output=True,
+			text=True,
+			timeout=timeout,
+			check=False,
+		)
+	except subprocess.TimeoutExpired as error:
+		stdout = error.stdout.decode() if isinstance(error.stdout, bytes) else error.stdout or ""
+		stderr = error.stderr.decode() if isinstance(error.stderr, bytes) else error.stderr or ""
+		log_path.write_text(stdout + stderr + f"\n{label} worker timed out after {timeout}s")
+		raise TimeoutError(f"{label} worker timed out after {timeout}s; see {log_path}") from error
+	log_path.write_text(completed.stdout + completed.stderr)
+	if completed.returncode != 0:
+		raise RuntimeError(f"{label} worker returned {completed.returncode}; see {log_path}")
+	return completed.stdout
 
 
 def _quantile(values: list[float], fraction: float) -> float:
@@ -268,7 +321,7 @@ def worker(
 def _parse_result(text: str) -> dict[str, Any]:
 	for line in reversed(text.splitlines()):
 		if line.startswith(RESULT_MARKER):
-			return json.loads(line[len(RESULT_MARKER) :])
+			return dict(json.loads(line[len(RESULT_MARKER) :]))
 	raise RuntimeError(f"No {RESULT_MARKER} marker in worker output")
 
 
@@ -332,7 +385,18 @@ def _run_torch_pair(
 	iterations: int,
 	timeout: float,
 	log_dir: Path,
+	*,
+	scheduler: NeuSbox | None = None,
+	cpu_cpus: int = 4,
+	cpu_memory_gib: int = 8,
+	gpu_cpus: int = 4,
+	gpu_memory_gib: int = 16,
+	monitor_window: float = 3600,
+	inherited_allocation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+	if mode in ("nccl-gpu", "nccl-staged") and (local_device != 0 or peer_device != 0):
+		raise ValueError("GPU peer workers must use scheduler-visible cuda:0")
+	log_dir.mkdir(parents=True, exist_ok=True)
 	local = _worker_command(
 		local_python,
 		mode,
@@ -359,54 +423,72 @@ def _run_torch_pair(
 		iterations,
 		timeout,
 	)
-	remote_command = "cd %s && %s" % (shlex.quote(str(peer_root)), shlex.join(peer))
-	peer_process = subprocess.Popen(
-		["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", peer_host, remote_command],
-		stdout=subprocess.PIPE,
-		stderr=subprocess.STDOUT,
-		text=True,
+	scheduler = scheduler or NeuSbox()
+	request = _resource_request(
+		mode,
+		cpu_cpus=cpu_cpus,
+		cpu_memory_gib=cpu_memory_gib,
+		gpu_cpus=gpu_cpus,
+		gpu_memory_gib=gpu_memory_gib,
 	)
-	local_process = None
-	peer_output = ""
-	peer_returncode = None
-	local_error = None
+	owned: list[Allocation] = []
+	peer_task = local_task = None
+	local_log_written = False
 	try:
-		try:
-			local_process = subprocess.run(
-				local,
-				cwd=local_root,
-				capture_output=True,
-				text=True,
-				timeout=timeout,
-				check=False,
-			)
-		except subprocess.TimeoutExpired as error:
-			local_error = f"local worker timed out after {timeout}s"
-			if error.stdout:
-				local_error += f": {error.stdout}"
-		try:
-			peer_output, peer_returncode = peer_process.communicate(timeout=timeout)
-			peer_returncode = peer_process.returncode
-		except subprocess.TimeoutExpired:
-			peer_process.kill()
-			peer_output, _ = peer_process.communicate()
-			peer_returncode = peer_process.returncode
-	finally:
-		if peer_process.poll() is None:
-			peer_process.kill()
-			peer_output, _ = peer_process.communicate()
-			peer_returncode = peer_process.returncode
-	local_stdout = "" if local_process is None else local_process.stdout
-	local_stderr = "" if local_process is None else local_process.stderr
-	log_dir.joinpath(f"{mode}.local.log").write_text(local_stdout + local_stderr + (local_error or ""))
-	log_dir.joinpath(f"{mode}.peer.log").write_text(peer_output)
-	if local_error or local_process is None or local_process.returncode != 0 or peer_returncode != 0:
-		raise RuntimeError(
-			f"{mode} failed: {local_error or f'local={local_process.returncode}, peer={peer_returncode}'}; "
-			f"see logs in {log_dir}"
+		peer_task = scheduler.submit(
+			peer_host,
+			request,
+			_scheduler_worker_command(peer, gpu=request.gpus == 1, python=peer_python),
+			cwd=peer_root,
+			wall_seconds=timeout,
+			ledger=log_dir / "tasks" / f"{mode}.peer.json",
+			label=f"{mode}-peer",
 		)
-	result = _parse_result(local_stdout)
+		owned.append(peer_task)
+		scheduler.wait_running([peer_task], monitor_window)
+		if inherited_allocation is None:
+			local_task = scheduler.submit(
+				None,
+				request,
+				_scheduler_worker_command(local, gpu=request.gpus == 1, python=local_python),
+				cwd=local_root,
+				wall_seconds=timeout,
+				ledger=log_dir / "tasks" / f"{mode}.local.json",
+				label=f"{mode}-local",
+			)
+			owned.append(local_task)
+			scheduler.wait_running(owned, monitor_window)
+			scheduler.wait_completed(owned, monitor_window)
+			local_stdout, _ = scheduler.result(local_task)
+			local_task_id = local_task.task_id
+		else:
+			local_command = _worker_execution_command(local, gpu=request.gpus == 1, python=local_python)
+			local_stdout = _run_local_worker(
+				local_command,
+				cwd=local_root,
+				timeout=timeout,
+				log_path=log_dir / f"{mode}.local.log",
+				label=mode,
+			)
+			local_log_written = True
+			scheduler.wait_completed([peer_task], monitor_window)
+			local_task_id = f"inherited:{inherited_allocation['name']}"
+		peer_output, _ = scheduler.result(peer_task)
+		if not local_log_written:
+			log_dir.joinpath(f"{mode}.local.log").write_text(local_stdout)
+		log_dir.joinpath(f"{mode}.peer.log").write_text(peer_output)
+		result = _parse_result(local_stdout)
+	except Exception as error:
+		cleanup_errors = scheduler.cleanup(owned)
+		if cleanup_errors:
+			error = RuntimeError(f"{error}; cleanup failures: {'; '.join(cleanup_errors)}")
+		raise RuntimeError(f"{mode} failed: {error}; see logs in {log_dir}") from error
+	finally:
+		log_dir.mkdir(parents=True, exist_ok=True)
+	if peer_task is None or (local_task is None and inherited_allocation is None):
+		raise RuntimeError(f"{mode} did not create both scheduler tasks")
 	result["peer_host"] = peer_host
+	result["task_ids"] = {"local": local_task_id, "peer": peer_task.task_id}
 	return result
 
 
@@ -453,165 +535,121 @@ def _run_rdma(
 	log_dir: Path,
 	rdma_port: int,
 	tunnel_port: int,
+	*,
+	peer_addr: str | None = None,
+	local_root: Path | None = None,
+	peer_root: Path | None = None,
+	scheduler: NeuSbox | None = None,
+	cpu_cpus: int = 4,
+	cpu_memory_gib: int = 8,
+	gpu_cpus: int = 4,
+	gpu_memory_gib: int = 16,
+	monitor_window: float = 3600,
+	local_python: str = "python",
+	peer_python: str = "python",
+	inherited_allocation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-	gpu = peer_device if mode == "rdma-gpu" else None
-	rows = []
+	if mode not in RDMA_MODES:
+		raise ValueError(f"Unsupported RDMA mode: {mode}")
+	if mode == "rdma-gpu" and peer_device != 0:
+		raise ValueError("GPU peer workers must use scheduler-visible cuda:0")
+	if peer_addr is None:
+		raise ValueError("RDMA measurements require the peer network address")
+	scheduler = scheduler or NeuSbox()
+	local_root = Path.cwd() if local_root is None else local_root
+	peer_root = Path.cwd() if peer_root is None else peer_root
+	request = _resource_request(
+		mode,
+		cpu_cpus=cpu_cpus,
+		cpu_memory_gib=cpu_memory_gib,
+		gpu_cpus=gpu_cpus,
+		gpu_memory_gib=gpu_memory_gib,
+	)
+	rows: list[dict[str, Any]] = []
+	log_dir.mkdir(parents=True, exist_ok=True)
 	for size in sizes:
 		for program, metric in (("ib_write_bw", "bandwidth"), ("ib_write_lat", "latency")):
 			stamp = uuid4().hex
 			remote_json = f"/tmp/neutronrt-peer-{stamp}.json"
-			remote_pidfile = f"/tmp/neutronrt-peer-{stamp}.pid"
-			server = _perftest_command(program, device, rdma_port, size, iterations, gpu, Path(remote_json))
-			remote_server = "rm -f %s; echo $$ > %s; exec %s" % (
-				shlex.quote(remote_pidfile),
-				shlex.quote(remote_pidfile),
-				shlex.join(server),
-			)
-			server_process = subprocess.Popen(
-				[
-					"ssh",
-					"-o",
-					"BatchMode=yes",
-					"-o",
-					"ConnectTimeout=5",
-					peer_host,
-					remote_server,
-				],
-				stdout=subprocess.PIPE,
-				stderr=subprocess.STDOUT,
-				text=True,
-			)
+			gpu_device = 0 if mode == "rdma-gpu" else None
+			server = _perftest_command(program, device, rdma_port, size, iterations, gpu_device, Path(remote_json))
 			client_json = log_dir / f"{mode}-{metric}-{size}.json"
-			client = _perftest_command(program, device, tunnel_port, size, iterations, gpu, client_json)
-			tunnel_process = None
-			completed = None
-			server_output = ""
-			tunnel_output = ""
-			server_returncode = None
-			client_error = None
-			try:
-				listener_deadline = time.monotonic() + min(timeout, 15)
-				while time.monotonic() < listener_deadline:
-					if server_process.poll() is not None:
-						break
-					listener = _remote_command(
-						peer_host,
-						f"ss -ltn '( sport = :{rdma_port} )' | tail -n +2",
-						timeout=3,
-					)
-					if listener.returncode == 0 and listener.stdout.strip():
-						break
-					time.sleep(0.25)
-				else:
-					client_error = f"remote perftest did not listen on port {rdma_port}"
-				if client_error is None and server_process.poll() is not None:
-					client_error = "remote perftest exited before the client started"
-				if client_error is None:
-					tunnel_process = subprocess.Popen(
-						[
-							"ssh",
-							"-N",
-							"-o",
-							"BatchMode=yes",
-							"-o",
-							"ConnectTimeout=5",
-							"-o",
-							"ExitOnForwardFailure=yes",
-							"-L",
-							f"{tunnel_port}:127.0.0.1:{rdma_port}",
-							peer_host,
-						],
-						stdout=subprocess.PIPE,
-						stderr=subprocess.STDOUT,
-						text=True,
-					)
-					local_deadline = time.monotonic() + min(timeout, 15)
-					while time.monotonic() < local_deadline:
-						if tunnel_process.poll() is not None:
-							break
-						if _local_listener(tunnel_port):
-							break
-						time.sleep(0.1)
-					if tunnel_process.poll() is not None:
-						tunnel_output, _ = tunnel_process.communicate()
-						client_error = "SSH tunnel exited before the perftest client started"
-					elif not _local_listener(tunnel_port):
-						client_error = f"SSH tunnel did not listen on local port {tunnel_port}"
-				if client_error is not None:
-					completed = subprocess.CompletedProcess(client, 1, "", client_error)
-				try:
-					if client_error is None:
-						completed = subprocess.run(
-							client + ["127.0.0.1"],
-							capture_output=True,
-							text=True,
-							timeout=timeout,
-							check=False,
-						)
-				except subprocess.TimeoutExpired:
-					client_error = f"client timed out after {timeout}s"
-			finally:
-				if tunnel_process is not None and tunnel_process.poll() is None:
-					tunnel_process.terminate()
-					try:
-						tunnel_output, _ = tunnel_process.communicate(timeout=5)
-					except subprocess.TimeoutExpired:
-						tunnel_process.kill()
-						tunnel_output, _ = tunnel_process.communicate()
-				elif tunnel_process is not None and not tunnel_output:
-					tunnel_output, _ = tunnel_process.communicate()
-				cleanup = _remote_command(
-					peer_host,
-					"if test -s %s; then kill $(cat %s) 2>/dev/null || true; fi; rm -f %s"
-					% (
-						shlex.quote(remote_pidfile),
-						shlex.quote(remote_pidfile),
-						shlex.quote(remote_pidfile),
-					),
-					timeout=10,
-				)
-				if cleanup.returncode != 0:
-					server_output += "\nremote cleanup failed: " + cleanup.stderr
-				if server_process.poll() is None:
-					server_process.terminate()
-					try:
-						server_output, _ = server_process.communicate(timeout=5)
-					except subprocess.TimeoutExpired:
-						server_process.kill()
-						server_output, _ = server_process.communicate()
-				else:
-					server_output, _ = server_process.communicate()
-				server_returncode = server_process.returncode
-			client_stdout = "" if completed is None else completed.stdout
-			client_stderr = "" if completed is None else completed.stderr
-			log_dir.joinpath(f"{mode}-{metric}-{size}.client.log").write_text(
-				client_stdout + client_stderr + (client_error or "")
-			)
-			log_dir.joinpath(f"{mode}-{metric}-{size}.server.log").write_text(server_output)
-			log_dir.joinpath(f"{mode}-{metric}-{size}.tunnel.log").write_text(tunnel_output)
-			result: dict[str, Any] = {
+			client = _perftest_command(program, device, rdma_port, size, iterations, gpu_device, client_json)
+			client.append(peer_addr)
+			owned: list[Allocation] = []
+			row: dict[str, Any] = {
 				"mode": mode,
 				"metric": metric,
 				"bytes": size,
-				"client_returncode": None if completed is None else completed.returncode,
-				"server_returncode": server_returncode,
 				"client_json": str(client_json),
 				"rdma_port": rdma_port,
 				"tunnel_port": tunnel_port,
 			}
+			try:
+				peer_task = scheduler.submit(
+					peer_host,
+					request,
+					_scheduler_worker_command(server, gpu=request.gpus == 1, python=peer_python),
+					cwd=peer_root,
+					wall_seconds=timeout,
+					ledger=log_dir / "tasks" / f"{mode}-{metric}-{size}.peer.json",
+					label=f"{mode}-{metric}-{size}-peer",
+				)
+				owned.append(peer_task)
+				scheduler.wait_running([peer_task], monitor_window)
+				if inherited_allocation is None:
+					local_task = scheduler.submit(
+						None,
+						request,
+						_scheduler_worker_command(client, gpu=request.gpus == 1, python=local_python),
+						cwd=local_root,
+						wall_seconds=timeout,
+						ledger=log_dir / "tasks" / f"{mode}-{metric}-{size}.local.json",
+						label=f"{mode}-{metric}-{size}-local",
+					)
+					owned.append(local_task)
+					scheduler.wait_running(owned, monitor_window)
+					scheduler.wait_completed(owned, monitor_window)
+					client_output, _ = scheduler.result(local_task)
+					local_task_id = local_task.task_id
+				else:
+					client_output = _run_local_worker(
+						_worker_execution_command(client, gpu=request.gpus == 1, python=local_python),
+						cwd=local_root,
+						timeout=timeout,
+						log_path=log_dir / f"{mode}-{metric}-{size}.client.log",
+						label=f"{mode}-{metric}-{size} client",
+					)
+					scheduler.wait_completed([peer_task], monitor_window)
+					local_task_id = f"inherited:{inherited_allocation['name']}"
+				server_output, _ = scheduler.result(peer_task)
+				if inherited_allocation is None:
+					log_dir.joinpath(f"{mode}-{metric}-{size}.client.log").write_text(client_output)
+				log_dir.joinpath(f"{mode}-{metric}-{size}.server.log").write_text(server_output)
+				row["task_ids"] = {"local": local_task_id, "peer": peer_task.task_id}
+				row["client_output"] = client_output
+				row["server_output"] = server_output
+			except Exception as error:
+				row["error"] = str(error)
+				cleanup_errors = scheduler.cleanup(owned)
+				if cleanup_errors:
+					row["cleanup_error"] = "; ".join(cleanup_errors)
 			if client_json.exists():
-				result["report"], parse_note = _read_perftest_report(client_json)
+				row["report"], parse_note = _read_perftest_report(client_json)
 				if parse_note is not None:
-					result["report_parse_note"] = parse_note
-			server_failed = server_returncode is not None and server_returncode not in (0, -15, -9)
-			if client_error or completed is None or completed.returncode != 0 or server_failed:
-				result["error"] = "perftest failed; inspect client/server logs"
-			rows.append(result)
+					row["report_parse_note"] = parse_note
+			rows.append(row)
 	return {"kind": "perftest", "mode": mode, "device": device, "rows": rows}
 
 
 def _install_peer_tool(peer_host: str, peer_root: Path, overwrite: bool) -> None:
-	files = [Path(__file__), Path(__file__).with_name("__init__.py")]
+	files = [
+		Path(__file__),
+		Path(__file__).with_name("scheduler.py"),
+		Path(__file__).with_name("allocation.py"),
+		Path(__file__).with_name("gpu_exec.py"),
+		Path(__file__).with_name("__init__.py"),
+	]
 	_remote_output(peer_host, f"mkdir -p {shlex.quote(str(peer_root / 'scripts' / 'peer'))}")
 	for source in files:
 		destination = peer_root / "scripts" / "peer" / source.name
@@ -623,22 +661,41 @@ def _install_peer_tool(peer_host: str, peer_root: Path, overwrite: bool) -> None
 					"BatchMode=yes",
 					"-o",
 					"ConnectTimeout=5",
+					"-o",
+					"ServerAliveInterval=5",
+					"-o",
+					"ServerAliveCountMax=2",
 					peer_host,
 					"test",
 					"-e",
 					str(destination),
 				],
 				check=False,
+				timeout=15,
 			).returncode
 			== 0
 		)
 		if exists and not overwrite:
 			continue
-		subprocess.run(["scp", "-q", str(source), f"{peer_host}:{destination}"], check=True)
+		subprocess.run(
+			[
+				"scp",
+				"-q",
+				"-o",
+				"BatchMode=yes",
+				"-o",
+				"ConnectTimeout=5",
+				str(source),
+				f"{peer_host}:{destination}",
+			],
+			check=True,
+			timeout=15,
+		)
 
 
 @app.command()
 def inspect(
+	peer_python: Annotated[str | None, typer.Option(help="Explicit frozen peer Python for package metadata")] = None,
 	peer_host: Annotated[str, typer.Option(help="SSH host for the second node")] = "gpunode2",
 	peer_root: Annotated[Path, typer.Option(help="Peer checkout containing NeutronRT")] = Path("/home/lhr/NeutronRT"),
 ):
@@ -650,7 +707,24 @@ def inspect(
 		"peer_root": str(peer_root),
 		"peer_python": _remote_output(peer_host, "command -v python || command -v python3 || true"),
 		"peer_rdma_devices": _remote_output(peer_host, "ibv_devinfo -l 2>/dev/null || true"),
+		"peer_cpu": _remote_output(peer_host, "lscpu -J"),
+		"peer_memory": _remote_output(peer_host, "free -b"),
+		"peer_gpus": _remote_output(
+			peer_host, "nvidia-smi --query-gpu=index,name,uuid,memory.total --format=csv,noheader"
+		),
+		"peer_scheduler": _remote_output(peer_host, "command -v neu-sbox || true"),
+		"peer_graph_python_candidates": _remote_output(
+			peer_host,
+			"ls /home/lhr/miniconda/envs/graph/bin/python "
+			"/home/hdd/lvhr/miniconda/envs/graph/bin/python 2>/dev/null || true",
+		),
 	}
+	if peer_python:
+		code = (
+			"import sys,json,importlib.metadata as m; print(json.dumps({'python':sys.executable,"
+			"'packages':{n:m.version(n) for n in ['torch','dgl','numpy','grpcio','protobuf']}}))"
+		)
+		result["peer_environment"] = json.loads(_remote_output(peer_host, shlex.join([peer_python, "-c", code])))
 	typer.echo(json.dumps(result, indent=2))
 
 
@@ -675,6 +749,11 @@ def run(
 	master_port: Annotated[int, typer.Option(min=1, max=65535)] = 29600,
 	rdma_port: Annotated[int, typer.Option(min=1, max=65535)] = 38515,
 	rdma_tunnel_port: Annotated[int, typer.Option(min=1, max=65535)] = 39515,
+	cpu_cpus: Annotated[int, typer.Option("--cpu-cpus", min=1)] = 4,
+	cpu_memory_gib: Annotated[int, typer.Option("--cpu-memory-gib", min=1)] = 8,
+	gpu_cpus: Annotated[int, typer.Option("--gpu-cpus", min=1)] = 4,
+	gpu_memory_gib: Annotated[int, typer.Option("--gpu-memory-gib", min=1)] = 16,
+	monitor_window: Annotated[float, typer.Option("--monitor-window", min=1, max=3600)] = 3600,
 	install_peer_tool: Annotated[bool, typer.Option(help="Install this tool if absent in the peer checkout")] = True,
 	overwrite_peer_tool: Annotated[bool, typer.Option()] = False,
 ):
@@ -685,6 +764,40 @@ def run(
 	unknown = set(chosen_modes) - set(TORCH_MODES) - set(RDMA_MODES)
 	if unknown:
 		raise typer.BadParameter(f"Unsupported modes: {sorted(unknown)}")
+	if any(mode in ("nccl-gpu", "nccl-staged", "rdma-gpu") for mode in chosen_modes) and (
+		local_device != 0 or peer_device != 0
+	):
+		raise typer.BadParameter("GPU modes use scheduler-visible cuda:0; do not pass a host GPU index")
+	scheduler = NeuSbox()
+	try:
+		inherited_allocation, inherited_gpu_uuids = scheduler.current_allocation()
+	except AllocationMetadataError as error:
+		raise typer.BadParameter(f"Could not validate the current Neu Box allocation: {error}") from error
+	required_requests = [
+		_resource_request(
+			mode,
+			cpu_cpus=cpu_cpus,
+			cpu_memory_gib=cpu_memory_gib,
+			gpu_cpus=gpu_cpus,
+			gpu_memory_gib=gpu_memory_gib,
+		)
+		for mode in chosen_modes
+	]
+	if inherited_allocation is not None:
+		required = ResourceRequest(
+			cpu=max(request.cpu for request in required_requests),
+			memory_gib=max(request.memory_gib for request in required_requests),
+			gpus=max(request.gpus for request in required_requests),
+		)
+		try:
+			validate_allocation_capacity(
+				inherited_allocation,
+				cpu=required.cpu,
+				memory_gib=required.memory_gib,
+				gpus=required.gpus,
+			)
+		except AllocationMetadataError as error:
+			raise typer.BadParameter(f"Current allocation cannot run the selected modes: {error}") from error
 	chosen_sizes = tuple(sizes or DEFAULT_SIZES)
 	peer_interface = peer_interface or interface
 	local_addr = _interface_address(interface)
@@ -707,6 +820,17 @@ def run(
 		"local_git": local_info,
 		"peer_git": peer_info,
 		"same_commit": local_info["commit"] == peer_info["commit"],
+		"local_allocation": (
+			{
+				"name": inherited_allocation["name"],
+				"cpu": inherited_allocation["cpu"],
+				"mem": inherited_allocation["mem"],
+				"devices": inherited_allocation["devices"],
+				"gpu_uuids": inherited_gpu_uuids,
+			}
+			if inherited_allocation is not None
+			else None
+		),
 		"modes": [],
 		"sizes": list(chosen_sizes),
 		"warning": "Communication results are independent of NeutronRT algorithm results.",
@@ -732,6 +856,13 @@ def run(
 					iterations,
 					timeout,
 					log_dir,
+					scheduler=scheduler,
+					cpu_cpus=cpu_cpus,
+					cpu_memory_gib=cpu_memory_gib,
+					gpu_cpus=gpu_cpus,
+					gpu_memory_gib=gpu_memory_gib,
+					monitor_window=monitor_window,
+					inherited_allocation=inherited_allocation,
 				)
 			else:
 				measurement = _run_rdma(
@@ -745,6 +876,18 @@ def run(
 					log_dir,
 					rdma_port + index,
 					rdma_tunnel_port + index,
+					peer_addr=peer_addr,
+					local_root=local_root,
+					peer_root=peer_root,
+					scheduler=scheduler,
+					cpu_cpus=cpu_cpus,
+					cpu_memory_gib=cpu_memory_gib,
+					gpu_cpus=gpu_cpus,
+					gpu_memory_gib=gpu_memory_gib,
+					monitor_window=monitor_window,
+					local_python=local_python,
+					peer_python=peer_python,
+					inherited_allocation=inherited_allocation,
 				)
 			result["modes"].append(measurement)
 		except Exception as error:  # Keep a failed transport visible beside successful modes.

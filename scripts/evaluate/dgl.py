@@ -10,12 +10,14 @@ import typer
 
 from benchmarks.streaming import run
 from lib.dataset.inference import load_graph
+from lib.profiling.accuracy import load_test_labels
 from lib.profiling.workload import RecordedWorkload
 
 
 class Method(StrEnum):
 	FULL = "RTEC-Full"
 	NS = "RTEC-NS"
+	UER = "RTEC-UER"
 
 
 app = typer.Typer(help=__doc__, pretty_exceptions_show_locals=False)
@@ -27,6 +29,8 @@ def main(
 	workload: Annotated[Path, typer.Option(exists=True, dir_okay=False)],
 	output: Annotated[Path, typer.Option(help="New directory for a source snapshot and measured trial")],
 	checkpoint: Annotated[Path | None, typer.Option(exists=True, dir_okay=False)] = None,
+	labels: Annotated[Path | None, typer.Option(exists=True, dir_okay=False)] = None,
+	test_split: Annotated[Path | None, typer.Option(exists=True, dir_okay=False)] = None,
 	method: Annotated[Method, typer.Option()] = Method.NS,
 	fanout: Annotated[int, typer.Option(min=1, help="Positive fanout at every layer for RTEC-NS")] = 5,
 	batch_size: Annotated[int, typer.Option(min=1)] = 8192,
@@ -34,8 +38,14 @@ def main(
 	output_device: Annotated[
 		str | None, typer.Option(help="Embedding cache device; defaults to the model device")
 	] = None,
+	output_budget_bytes: Annotated[
+		int | None, typer.Option(min=1, help="Declared output-cache budget; required for CUDA output caches")
+	] = None,
 	threads: Annotated[int, typer.Option(min=1)] = 4,
 	add_inverse_edges: Annotated[bool, typer.Option("--add-inverse-edges")] = False,
+	phase_file: Annotated[
+		Path | None, typer.Option(help="Optional atomic JSON phase receipt for a bounded scheduler")
+	] = None,
 ) -> None:
 	logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 	torch.set_num_threads(threads)
@@ -52,15 +62,21 @@ def main(
 		raise typer.BadParameter("A CUDA output cache must use the model's CUDA device")
 	graph = load_graph(data, add_inverse_edges=add_inverse_edges)
 	features = graph.ndata.pop("feat")
+	label_values, test_mask = load_test_labels(labels, test_split, graph.num_nodes())
 	run(
 		graph,
 		features,
 		recording,
 		output,
-		fanout=fanout if method == Method.NS else None,
+		fanout=fanout if method is Method.NS else None,
 		device=model_device,
 		output_device=cache_device,
 		batch_size=batch_size,
+		output_budget_bytes=output_budget_bytes,
+		method=method.value,
+		phase_file=phase_file,
+		labels=label_values,
+		test_mask=test_mask,
 	)
 
 

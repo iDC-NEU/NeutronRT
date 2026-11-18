@@ -1,0 +1,22 @@
+{
+  "id": "papers100m-prepare-v1",
+  "hardware_profile": "prepare-papers100m",
+  "wall_seconds": 14400,
+  "required_files": [
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/revision-datasets-proxy/papers100M-bin.zip"
+  ],
+  "environment": {
+    "CUDA_VISIBLE_DEVICES": "",
+    "OMP_NUM_THREADS": "8",
+    "MKL_NUM_THREADS": "8",
+    "OPENBLAS_NUM_THREADS": "8"
+  },
+  "command": [
+    "{python}",
+    "-m",
+    "scripts.download_datasets",
+    "papers100m",
+    "--root",
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/revision-datasets-proxy"
+  ]
+}

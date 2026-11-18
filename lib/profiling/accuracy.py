@@ -1,11 +1,29 @@
 """Accuracy/error evaluation for captured query rows, outside performance windows."""
 
+from pathlib import Path
 from typing import Optional
 
 import torch
 from torch import Tensor
 
 from lib.profiling.experiment import sample_ids
+
+
+def load_test_labels(labels: Path | None, test_split: Path | None, nodes: int):
+	"""Load official labels/split once, outside performance measurement."""
+	if labels is None and test_split is None:
+		return None, None
+	if labels is None or test_split is None:
+		raise ValueError("Both labels and test split are required")
+	import pandas as pd
+
+	values = torch.from_numpy(pd.read_csv(labels, header=None).to_numpy().reshape(-1)).long()
+	ids = torch.from_numpy(pd.read_csv(test_split, header=None).to_numpy().reshape(-1)).long()
+	if values.shape != (nodes,) or not ids.numel() or ids.min() < 0 or ids.max() >= nodes:
+		raise ValueError("Labels or official test IDs do not match the graph")
+	mask = torch.zeros(nodes, dtype=torch.bool)
+	mask[ids] = True
+	return values, mask
 
 
 def verification_sample(graph, count: int, generator: torch.Generator) -> Tensor:

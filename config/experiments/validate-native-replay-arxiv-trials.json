@@ -1,0 +1,25 @@
+{
+  "id": "dedicated-native-arxiv-real-trace-integration-v1",
+  "purpose": "Integration gate on a real recorded trace; not planned paper performance results",
+  "hardware_profile": "arxiv-cpu",
+  "wall_seconds": 1800,
+  "startup_seconds": 900,
+  "trials": [
+    {
+      "id": "arxiv-dgl-full",
+      "method": "RTEC-Full",
+      "command": ["{python}", "-m", "scripts.evaluate.dgl", "--data", "/mnt/nfs0/lvhr/neutronrt-results/preparation/topology-five-20261116-v1/topologies/arxiv/graph.bin", "--workload", "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261116-v2/cohort/arxiv-NrtInc-r0/report/sage-NrtInc-0-workload.pt", "--checkpoint", "/mnt/nfs0/lvhr/neutronrt-evaluation-data/checkpoints/sage-arxiv.pt", "--method", "RTEC-Full", "--device", "cpu", "--output-device", "cpu", "--output-budget-bytes", "268435456", "--batch-size", "8192", "--threads", "4", "--phase-file", "{trial}/phase.json", "--output", "{trial}/report"]
+    },
+    {
+      "id": "arxiv-dgl-ns",
+      "method": "RTEC-NS",
+      "command": ["{python}", "-m", "scripts.evaluate.dgl", "--data", "/mnt/nfs0/lvhr/neutronrt-results/preparation/topology-five-20261116-v1/topologies/arxiv/graph.bin", "--workload", "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261116-v2/cohort/arxiv-NrtInc-r0/report/sage-NrtInc-0-workload.pt", "--checkpoint", "/mnt/nfs0/lvhr/neutronrt-evaluation-data/checkpoints/sage-arxiv.pt", "--method", "RTEC-NS", "--fanout", "5", "--device", "cpu", "--output-device", "cpu", "--output-budget-bytes", "268435456", "--batch-size", "8192", "--threads", "4", "--phase-file", "{trial}/phase.json", "--output", "{trial}/report"]
+    },
+    {
+      "id": "arxiv-layerwise-uer",
+      "method": "RTEC-UER",
+      "comparison_group": "framework_ablation",
+      "command": ["{python}", "-m", "scripts.evaluate.dgl", "--data", "/mnt/nfs0/lvhr/neutronrt-results/preparation/topology-five-20261116-v1/topologies/arxiv/graph.bin", "--workload", "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261116-v2/cohort/arxiv-NrtInc-r0/report/sage-NrtInc-0-workload.pt", "--checkpoint", "/mnt/nfs0/lvhr/neutronrt-evaluation-data/checkpoints/sage-arxiv.pt", "--method", "RTEC-UER", "--device", "cpu", "--output-device", "cpu", "--output-budget-bytes", "268435456", "--batch-size", "8192", "--threads", "4", "--phase-file", "{trial}/phase.json", "--output", "{trial}/report"]
+    }
+  ]
+}

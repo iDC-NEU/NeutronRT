@@ -205,11 +205,14 @@ class DistributedEmbeddingService(EmbeddingService[RemoteEndpoint]):
 			self._ensure_rows(task.sources, task.layer - 1)
 			if self._aggregate_only is not None:
 				self._aggregate_only.ensure_prefix(task.sources, task.layer - 1)
-		worker = self._pick()
-		plane.make_room(worker.owner, task.targets.numel() * self.widths[task.layer] * 4 * len(self._state_catalogs()))
+		task_cost = self._task_cost(task)
+		worker = self._pick(required=task.sources, input_layer=task.layer - 1, task_cost=task_cost)
 		outputs = []
 		obsolete: list[StateKey] = []
 		try:
+			plane.make_room(
+				worker.owner, task.targets.numel() * self.widths[task.layer] * 4 * len(self._state_catalogs())
+			)
 			for catalog in self._state_catalogs():
 				key = catalog.reserve(task.layer, task.targets, version)
 				output = _Reservation(catalog, key)
@@ -280,6 +283,7 @@ class DistributedEmbeddingService(EmbeddingService[RemoteEndpoint]):
 					plane.retire(output.key)
 			for retired in obsolete:
 				plane.retire(retired)
+			self._release_dispatch(worker)
 
 	def _load(
 		self,

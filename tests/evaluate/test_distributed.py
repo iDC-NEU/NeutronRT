@@ -129,6 +129,48 @@ def test_cli_accepts_canonical_methods_and_rejects_duplicates(monkeypatch, tmp_p
 	assert result.exit_code == 2
 
 
+def test_cli_exposes_policy_identities_and_rejects_unmatched_policy_options(monkeypatch, tmp_path):
+	captured = []
+	monkeypatch.setattr(distributed, "_run", captured.append)
+	result = CliRunner().invoke(
+		distributed.app,
+		[
+			"--output",
+			str(tmp_path),
+			"--dispatch-policy",
+			"locality_load",
+			"--dispatch-locality-weight",
+			"2",
+			"--deferred-mode",
+			"fixed_time",
+			"--deferred-window-seconds",
+			"1.5",
+		],
+	)
+	assert result.exit_code == 0, result.output
+	args = captured[0]
+	assert args.dispatch_policy == "locality_load"
+	assert not args.worker_feature_cache and args.worker_feature_cache_bytes == 0
+	assert args.deferred_mode == "fixed_time" and args.deferred_window_seconds == 1.5
+	for option in (
+		["--worker-feature-cache-bytes", "128"],
+		["--worker-feature-cache", "--worker-feature-cache-bytes", "128"],
+		["--deferred-window-seconds", "1"],
+		["--deferred-mode", "fixed_time"],
+	):
+		bad = CliRunner().invoke(distributed.app, ["--output", str(tmp_path), *option])
+		assert bad.exit_code == 2
+
+
+def test_remote_storage_requires_an_exported_topology_base(tmp_path):
+	result = CliRunner().invoke(
+		distributed.app,
+		["--output", str(tmp_path), "--storage-endpoint", "127.0.0.1:27182"],
+	)
+	assert result.exit_code == 2
+	assert "--topology-base" in result.output
+
+
 @pytest.mark.parametrize("workload", ["edges", "mixed"])
 def test_trials_isolate_topology_caches_and_copy_features_only_for_mutable_traces(monkeypatch, tmp_path, workload):
 	from lib.runtime.launch import Placement
@@ -137,7 +179,18 @@ def test_trials_isolate_topology_caches_and_copy_features_only_for_mutable_trace
 	monkeypatch.setattr(distributed, "_run", captured.append)
 	result = CliRunner().invoke(
 		distributed.app,
-		["--output", str(tmp_path), "--models", "sage", "--methods", "RTEC-NS", "--workload", workload],
+		[
+			"--output",
+			str(tmp_path),
+			"--topology-base",
+			str(tmp_path / "persistent-base"),
+			"--models",
+			"sage",
+			"--methods",
+			"RTEC-NS",
+			"--workload",
+			workload,
+		],
 	)
 	assert result.exit_code == 0, result.output
 	args = captured[0]
@@ -152,6 +205,7 @@ def test_trials_isolate_topology_caches_and_copy_features_only_for_mutable_trace
 	def inspect_inputs(trial_graph, trial_features, *positional, **keywords):
 		trial_graph.create_formats_()
 		trial_graph.edata["trial_only"] = torch.ones(trial_graph.num_edges())
+		assert keywords["storage_exported_base"] == str(tmp_path / "persistent-base")
 		assert graph.formats() == formats and "trial_only" not in graph.edata
 		assert (trial_features.data_ptr() == features.data_ptr()) == (workload == "edges")
 		if workload == "mixed":
@@ -225,9 +279,14 @@ def test_verification_chunks_rpc_outputs_and_rejects_mixed_versions():
 		return wire.QueryResponse(values=_to_wire(expected[nodes]), version=next(versions))
 
 	stub = SimpleNamespace(Query=Mock(side_effect=query))
-	report = distributed.verify(stub, model, graph, features, batch_size=2)
+	labels = expected.argmax(1)
+	test_mask = torch.tensor([True, False, True, False, True])
+	report = distributed.verify(stub, model, graph, features, batch_size=2, labels=labels, test_mask=test_mask)
 	assert report["rows"] == 5 and report["oracle_scope"] == "all rows"
 	assert report["mean_squared_error"] == 0
+	assert report["labelled_test_rows"] == 3
+	assert report["sample_test_accuracy"] == report["fresh_sample_test_accuracy"] == 1
+	assert report["accuracy_loss_percentage_points"] == 0
 	assert torch.equal(torch.cat(seen), torch.arange(5))
 	versions = iter([7, 8, 8])
 	with pytest.raises(RuntimeError, match="version changed"):

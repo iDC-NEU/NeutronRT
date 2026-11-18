@@ -62,7 +62,21 @@ message Completion {
   repeated uint64 affected = 4;
   uint64 input_changes = 5;
   uint64 model_tasks = 6;
-  uint64 input_version = 7; // publication version may cover several staged inputs
+  uint64 input_version = 7; // input version; version is the publication version
+  optional uint64 admitted_at_ns = 8;
+  optional uint64 execution_started_at_ns = 9;
+  optional uint64 staged_at_ns = 10;
+  optional uint64 publication_observed_at_ns = 11;
+  optional uint64 completion_at_ns = 12;
+	// Server monotonic timestamp immediately before preparing this reply. This
+	// is not a client observation; clients must add a local receive timestamp.
+	optional uint64 server_reply_prepared_at_ns = 13;
+  optional uint64 queue_wait_ns = 14;
+  optional uint64 execution_ns = 15;
+  optional uint64 delayed_publication_wait_ns = 16;
+  string timestamp_scope = 17; // server perf_counter_ns; never a client/server wall-clock mix
+  string publication_source = 18; // exact service return or observed deferred future callback
+	string state = 19; // queued, executing, staged, published, or failed
 }
 
 message QueryRequest {
@@ -92,4 +106,6 @@ message RuntimeInfo {
   double uptime_seconds = 11;
   optional uint64 incomplete_version = 12;
   uint64 max_staleness = 13;
+  uint64 admitted_updates = 14;
+  uint64 pending_update_bytes = 15;
 }

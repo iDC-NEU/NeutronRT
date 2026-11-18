@@ -52,6 +52,9 @@ def test_small_workspace_falls_back_without_leaking_temporary_state():
 		service.change_features(torch.tensor([0, 3]), torch.ones(2, 4))
 		_check(service, model)
 		assert service.counters.delta_workspace_fallbacks > 0
+		assert any(
+			"workspace_capacity" in values for values in service.profile()["fallback_reasons"]["layers"].values()
+		)
 		assert all(
 			key.kind == "a" or service.catalog.current_nodes(key).numel() for key in service.remote_plane._shapes
 		)
@@ -95,3 +98,26 @@ def test_interrupted_sparse_aggregate_only_update_cleans_temporaries_and_resumes
 		service.resume_update(1)
 		_check(service, model)
 		assert service.graph.num_edges() == before + 2
+
+
+def test_reconstruction_resolves_prefix_after_admission_discards_cached_h(monkeypatch):
+	from contextlib import ExitStack
+
+	with _service(aggregate_only=True) as (service, model):
+		_check(service, model)
+		plane = service.remote_plane
+		original = plane.make_room
+		evicted = []
+
+		def make_room(owner, required):
+			for key in tuple(plane._shapes):
+				if key.kind == "h":
+					evicted.append(key)
+					plane.retire(key)
+			original(owner, required)
+
+		monkeypatch.setattr(plane, "make_room", make_room)
+		with ExitStack() as stack:
+			service._aggregate_only.reconstruct(torch.tensor([0, 1]), 2, stack)
+		assert evicted
+		_check(service, model)

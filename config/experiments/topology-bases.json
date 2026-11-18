@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "task_id": "bade4642e8e1",
+  "status": "completed",
+  "root": "/mnt/nfs0/lvhr/neutronrt-results/preparation/topology-five-20261116-v1/topologies",
+  "datasets": [
+    {"name": "arxiv", "manifest": "arxiv/manifest.json", "base": "arxiv/base", "native_graph": "arxiv/graph.bin", "native_graph_add_inverse_edges": false},
+    {"name": "products", "manifest": "products/manifest.json", "base": "products/base", "native_graph": "products/graph.bin", "native_graph_add_inverse_edges": false, "note": "Reverse edges already included in this graph and base"},
+    {"name": "reddit", "manifest": "reddit/manifest.json", "base": "reddit/base"},
+    {"name": "twitter", "manifest": "twitter/manifest.json", "base": "twitter/base"},
+    {"name": "friendster", "manifest": "friendster/manifest.json", "base": "friendster/base"}
+  ],
+  "papers100m": {"status": "pending_download_and_offline_preparation", "manifest": "config/experiments/prepare-topology-papers100m.json"}
+}

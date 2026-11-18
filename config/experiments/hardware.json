@@ -1,0 +1,124 @@
+{
+  "schema": 1,
+  "frozen_date": "2026-11-16",
+  "cpu_unit": "neu-sbox CPU quota; not exclusive physical-core pinning",
+  "memory_unit": "neu-sbox G",
+  "concurrent_experiments": 1,
+  "profiles": {
+    "prepare-topology": {
+      "cpu": 16,
+      "mem": 256,
+      "gpus": 0
+    },
+    "arxiv-cpu": {
+      "cpu": 16,
+      "mem": 32,
+      "gpus": 0
+    },
+    "baseline-gpu": {
+      "cpu": 16,
+      "mem": 64,
+      "gpus": 1
+    },
+    "external-cpu": {
+      "cpu": 16,
+      "mem": 64,
+      "gpus": 0
+    },
+    "large-graph": {
+      "cpu": 16,
+      "mem": 256,
+      "gpus": 1
+    },
+    "scale-2gpu": {
+      "cpu": 16,
+      "mem": 256,
+      "gpus": 2
+    },
+    "scale-4gpu": {
+      "cpu": 16,
+      "mem": 256,
+      "gpus": 4
+    },
+    "peer-cpu": {
+      "cpu": 4,
+      "mem": 8,
+      "gpus": 0
+    },
+    "peer-gpu": {
+      "cpu": 4,
+      "mem": 16,
+      "gpus": 1
+    },
+    "prepare-reddit": {
+      "cpu": 4,
+      "mem": 64,
+      "gpus": 0
+    },
+    "prepare-friendster": {
+      "cpu": 4,
+      "mem": 32,
+      "gpus": 0
+    },
+    "download": {
+      "cpu": 4,
+      "mem": 8,
+      "gpus": 0
+    },
+    "prepare-papers100m": {
+      "cpu": 16,
+      "mem": 256,
+      "gpus": 0
+    }
+  },
+  "host_reserve": {
+    "minimum_gib": 64,
+    "minimum_fraction": 0.2
+  },
+  "constraints": [
+    "Freeze GPU model, UUID and physical placement in each cohort; different models form separate cohorts",
+    "Use one profile per participating host; reserve both hosts for peer experiments",
+    "Queue unchanged requests when unavailable; never use zero/unlimited CPU or RAM",
+    "Large-graph profile is a fixed ceiling, not proof that full graph/oracle fits",
+    "Two storage hosts use large-graph profile memory each, with GPUs only on compute hosts",
+    "Do not run network measurements while dataset downloads share their interface"
+  ],
+  "inventory": {
+    "local": {
+      "host": "gpunode1",
+      "cpu": "2 x Intel Xeon Silver 4316",
+      "physical_cores": 40,
+      "logical_cpus": 80,
+      "ram_bytes": 540613419008,
+      "gpu_model": "NVIDIA RTX A5000",
+      "gpu_count": 4,
+      "gpu_memory_mib_each": 24564
+    },
+    "peer": {
+      "host": "gpunode2",
+      "gpu_model_expected": "NVIDIA RTX A6000",
+      "gpu_count_expected": 4,
+      "verified": true,
+      "checkout_commit": "94c56d4e453208d600edafe4dc08f3334cb1b6b4",
+      "checkout_clean": false,
+      "cpu": "2 x Intel Xeon Silver 4316",
+      "physical_cores": 40,
+      "logical_cpus": 80,
+      "ram_bytes": 540610248704,
+      "gpu_model": "NVIDIA RTX A6000",
+      "gpu_count": 4,
+      "gpu_memory_mib_each": 49140,
+      "synchronized_worktree": "/home/lhr/NeutronRT-experiments-20261116",
+      "synchronized_commit": "fe672bd096ef5f9d28e0bdce5d70d3d233c83c9c",
+      "scheduler": "/usr/local/bin/neu-sbox",
+      "graph_python": "/home/hdd4/lhr/miniconda3/envs/graph/bin/python",
+      "packages": {
+        "torch": "2.4.0+cu124",
+        "dgl": "2.4.0+cu124",
+        "numpy": "2.4.6",
+        "grpcio": "1.81.1",
+        "protobuf": "6.33.6"
+      }
+    }
+  }
+}

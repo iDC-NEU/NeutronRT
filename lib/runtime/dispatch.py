@@ -58,12 +58,44 @@ def run_wave(service: "DistributedEmbeddingService", tasks: Sequence[LayerPlan])
 			service._run_task(block, service.catalog.version)
 		return
 	plane, transport = service.remote_plane, service.remote_plane.transport
-	workers = [service._pick() for _ in tasks]
+	workers = []
+	remaining = list(service.workers)
+	try:
+		for task in tasks:
+			worker = service._pick(
+				required=task.sources,
+				input_layer=task.layer - 1,
+				task_cost=service._task_cost(task),
+				candidates=remaining,
+			)
+			workers.append(worker)
+			remaining.remove(worker)
+	except BaseException:
+		for worker in workers:
+			service._release_dispatch(worker)
+		raise
 	if len({worker.owner for worker in workers}) != len(workers):
+		for worker in workers:
+			service._release_dispatch(worker)
 		raise ValueError("A wave cannot assign two tasks to the same worker")
 	# Writeback/eviction must finish before prepared tasks pin their input chunks.
-	for task, worker in zip(tasks, workers, strict=True):
-		plane.make_room(worker.owner, task.targets.numel() * service.widths[task.layer] * 4)
+	try:
+		for task, worker in zip(tasks, workers, strict=True):
+			plane.make_room(worker.owner, task.targets.numel() * service.widths[task.layer] * 4)
+	except BaseException:
+		for worker in workers:
+			service._release_dispatch(worker)
+		raise
+	released = False
+
+	def release_workers() -> None:
+		nonlocal released
+		if released:
+			return
+		released = True
+		for worker in workers:
+			service._release_dispatch(worker)
+
 	outputs = []
 	failure: Optional[BaseException] = None
 	with ExitStack() as stack:
@@ -144,5 +176,6 @@ def run_wave(service: "DistributedEmbeddingService", tasks: Sequence[LayerPlan])
 						output.worker.bytes_used = max(
 							0, output.worker.bytes_used - output.result.shape[0] * output.result.shape[1] * 4
 						)
+			release_workers()
 	if failure is not None:
 		raise failure

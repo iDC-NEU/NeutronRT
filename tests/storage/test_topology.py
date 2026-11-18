@@ -178,6 +178,25 @@ def test_export_is_readonly_mapped_and_rejects_nonempty_directories(tmp_path):
 		BaseTopology.export(_graph(), tmp_path)
 
 
+def test_persistent_exported_base_is_verified_and_survives_topology_close(tmp_path):
+	graph = _graph()
+	base_folder = tmp_path / "persistent-base"
+	BaseTopology.export(graph, base_folder)
+	with ShardedTopology(graph, 1, exported_base=base_folder) as topology:
+		assert topology.base.folder == base_folder.resolve()
+		assert topology.initialization["base_fingerprint"]
+	assert base_folder.exists()
+
+	wrong = dgl.graph(([0, 1, 2, 3, 4, 5, 0], [1, 2, 3, 4, 5, 0, 2]), num_nodes=6)
+	with pytest.raises(ValueError, match="graph content"):
+		ShardedTopology(wrong, 1, exported_base=base_folder)
+
+
+def test_remote_storage_requires_a_persistent_exported_base(tmp_path):
+	with pytest.raises(ValueError, match="pre-exported persistent base"):
+		ShardedTopology(_graph(), 1, storage_endpoints=("127.0.0.1:1",))
+
+
 def test_empty_graph_and_invalid_requests_do_not_change_partition_state(tmp_path):
 	empty = torch.empty(0, dtype=torch.int64)
 	with ShardedTopology(dgl.graph((empty, empty), num_nodes=0), 3, directory=tmp_path) as topology:

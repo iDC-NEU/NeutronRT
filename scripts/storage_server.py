@@ -8,6 +8,7 @@ import socket
 import time
 from multiprocessing.connection import Listener
 from pathlib import Path
+from threading import Thread
 from typing import Annotated
 
 import numpy as np
@@ -16,6 +17,7 @@ import typer
 
 from lib.storage.base import BaseTopology
 from lib.storage.capacity import GIB, StorageNodeBudget, partition_base_bytes
+from lib.storage.remote import base_fingerprint
 from lib.storage.shard import TopologyShard
 
 
@@ -86,9 +88,11 @@ def serve(
 						"torch_loaded": False,
 						"cuda_initialized": False,
 					}
+				elif command == "rss":
+					result = {"rss_bytes": int(psutil.Process().memory_info().rss)}
 				else:
 					raise ValueError("Unknown remote storage operation")
-				if profiling and command != "stats":
+				if profiling and command not in ("stats", "rss"):
 					operations[command] = operations.get(command, 0) + 1
 					seconds[command] = seconds.get(command, 0.0) + time.perf_counter() - started
 				connection.send((True, result))
@@ -109,19 +113,16 @@ def validate_init(
 	overlay_bytes: int,
 	response_bytes: int,
 ) -> None:
-	if (
-		len(args) != 9
-		or args[0] != str(base.folder)
-		or tuple(args[1:5])
-		!= (
-			base.nodes,
-			base.edges,
-			start,
-			stop,
-		)
+	if len(args) != 10 or tuple(args[1:5]) != (
+		base.nodes,
+		base.edges,
+		start,
+		stop,
 	):
 		raise ValueError("Remote storage init does not match this topology partition")
-	if tuple(args[5:]) != (overlay_bytes, response_bytes, capacity_bytes, reserve_bytes):
+	if args[9] != base_fingerprint(base):
+		raise ValueError("Remote storage init does not match the exported graph content")
+	if tuple(args[5:9]) != (overlay_bytes, response_bytes, capacity_bytes, reserve_bytes):
 		raise ValueError("Remote storage init does not match this node budget")
 	StorageNodeBudget("remote", capacity_bytes, reserve_bytes)
 	if partition_base_bytes(base, start, stop) > capacity_bytes - reserve_bytes:
@@ -161,39 +162,43 @@ def main(
 		raise typer.BadParameter(str(error)) from error
 	listener = Listener((host, port), authkey=authkey.encode())
 	print(json.dumps({"host": socket.gethostname(), "listen": listener.address, "pid": os.getpid()}), flush=True)
+
+	def handle(connection):
+		try:
+			command, *args = connection.recv()
+			if command != "ping":
+				raise ValueError("First storage command must be ping")
+			connection.send((True, "ready"))
+			command, *args = connection.recv()
+			if command != "init":
+				raise ValueError("Second storage command must be init")
+			validate_init(
+				args,
+				base=base_topology,
+				start=start,
+				stop=stop,
+				capacity_bytes=capacity_bytes,
+				reserve_bytes=reserve_bytes,
+				overlay_bytes=overlay_bytes,
+				response_bytes=response_bytes,
+			)
+			serve(
+				connection,
+				base=base_topology,
+				start=start,
+				stop=stop,
+				overlay_bytes=overlay_bytes,
+				response_bytes=response_bytes,
+				profiling=profiling,
+			)
+		except Exception as error:
+			connection.send((False, (type(error).__name__, str(error))))
+			connection.close()
+
 	try:
 		while True:
 			connection = listener.accept()
-			try:
-				command, *args = connection.recv()
-				if command != "ping":
-					raise ValueError("First storage command must be ping")
-				connection.send((True, "ready"))
-				command, *args = connection.recv()
-				if command != "init":
-					raise ValueError("Second storage command must be init")
-				validate_init(
-					args,
-					base=base_topology,
-					start=start,
-					stop=stop,
-					capacity_bytes=capacity_bytes,
-					reserve_bytes=reserve_bytes,
-					overlay_bytes=overlay_bytes,
-					response_bytes=response_bytes,
-				)
-				serve(
-					connection,
-					base=base_topology,
-					start=start,
-					stop=stop,
-					overlay_bytes=overlay_bytes,
-					response_bytes=response_bytes,
-					profiling=profiling,
-				)
-			except Exception as error:
-				connection.send((False, (type(error).__name__, str(error))))
-				connection.close()
+			Thread(target=handle, args=(connection,), daemon=True).start()
 	finally:
 		listener.close()
 
