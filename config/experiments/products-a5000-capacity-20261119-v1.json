@@ -1,0 +1,28 @@
+{
+  "id": "products-a5000-capacity-20261119-v1",
+  "hardware_profile": "baseline-gpu",
+  "wall_seconds": 29800,
+  "environment": {
+    "OMP_NUM_THREADS": "4",
+    "MKL_NUM_THREADS": "4",
+    "OPENBLAS_NUM_THREADS": "4"
+  },
+  "required_files": [
+    "config/experiments/products-a5000-capacity-20261119-v1-trials.json",
+    "/mnt/nfs0/lvhr/neutronrt-results/preparation/topology-five-20261116-v1/topologies/products/graph.bin",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/products-NrtInc-r0/report/sage-NrtInc-0-workload.pt"
+  ],
+  "hash_files": [
+    "config/experiments/products-a5000-capacity-20261119-v1-trials.json",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/products-NrtInc-r0/report/sage-NrtInc-0-workload.pt"
+  ],
+  "command": [
+    "{python}",
+    "-m",
+    "scripts.evaluate.cohort",
+    "config/experiments/products-a5000-capacity-20261119-v1-trials.json",
+    "--output",
+    "{output}/cohort"
+  ],
+  "purpose": "Full Products capacity and correctness smoke on one A5000. One paired recording, Full last."
+}

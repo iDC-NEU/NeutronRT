@@ -1,0 +1,82 @@
+[
+  {
+    "name": "round-robin",
+    "devices": [
+      "cpu",
+      "cpu"
+    ],
+    "interface": "async",
+    "max_inflight": 16,
+    "query_every": 0,
+    "idle_flush_seconds": 0.05,
+    "switches": {
+      "coalescing": true,
+      "pipeline": true,
+      "operator_incremental": true,
+      "concurrent_compute": true
+    }
+  },
+  {
+    "name": "locality-load",
+    "devices": [
+      "cpu",
+      "cpu"
+    ],
+    "interface": "async",
+    "max_inflight": 16,
+    "query_every": 0,
+    "idle_flush_seconds": 0.05,
+    "switches": {
+      "coalescing": true,
+      "pipeline": true,
+      "operator_incremental": true,
+      "concurrent_compute": true
+    },
+    "reference": "round-robin",
+    "dispatch_mode": "locality_load",
+    "dispatch_locality_weight": 1,
+    "dispatch_load_weight": 1
+  },
+  {
+    "name": "locality-only",
+    "devices": [
+      "cpu",
+      "cpu"
+    ],
+    "interface": "async",
+    "max_inflight": 16,
+    "query_every": 0,
+    "idle_flush_seconds": 0.05,
+    "switches": {
+      "coalescing": true,
+      "pipeline": true,
+      "operator_incremental": true,
+      "concurrent_compute": true
+    },
+    "reference": "round-robin",
+    "dispatch_mode": "locality_load",
+    "dispatch_locality_weight": 1,
+    "dispatch_load_weight": 0
+  },
+  {
+    "name": "load-only",
+    "devices": [
+      "cpu",
+      "cpu"
+    ],
+    "interface": "async",
+    "max_inflight": 16,
+    "query_every": 0,
+    "idle_flush_seconds": 0.05,
+    "switches": {
+      "coalescing": true,
+      "pipeline": true,
+      "operator_incremental": true,
+      "concurrent_compute": true
+    },
+    "reference": "round-robin",
+    "dispatch_mode": "locality_load",
+    "dispatch_locality_weight": 0,
+    "dispatch_load_weight": 1
+  }
+]

@@ -1,0 +1,36 @@
+{
+  "id": "products-a5000-paired-20261119-v1",
+  "hardware_profile": "baseline-gpu",
+  "wall_seconds": 24200,
+  "environment": {
+    "OMP_NUM_THREADS": "4",
+    "MKL_NUM_THREADS": "4",
+    "OPENBLAS_NUM_THREADS": "4"
+  },
+  "required_files": [
+    "config/experiments/products-a5000-paired-20261119-v1-trials.json",
+    "/mnt/nfs0/lvhr/neutronrt-results/preparation/topology-five-20261116-v1/topologies/products/graph.bin",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/products-NrtInc-r0/report/sage-NrtInc-0-workload.pt",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/products-NrtInc-r1/report/sage-NrtInc-1-workload.pt",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/products-NrtInc-r2/report/sage-NrtInc-2-workload.pt",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/products-NrtInc-r3/report/sage-NrtInc-3-workload.pt",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/products-NrtInc-r4/report/sage-NrtInc-4-workload.pt"
+  ],
+  "hash_files": [
+    "config/experiments/products-a5000-paired-20261119-v1-trials.json",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/products-NrtInc-r0/report/sage-NrtInc-0-workload.pt",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/products-NrtInc-r1/report/sage-NrtInc-1-workload.pt",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/products-NrtInc-r2/report/sage-NrtInc-2-workload.pt",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/products-NrtInc-r3/report/sage-NrtInc-3-workload.pt",
+    "/mnt/nfs0/lvhr/neutronrt-results/common-baselines-gpu-20261117-v2/cohort/products-NrtInc-r4/report/sage-NrtInc-4-workload.pt"
+  ],
+  "command": [
+    "{python}",
+    "-m",
+    "scripts.evaluate.cohort",
+    "config/experiments/products-a5000-paired-20261119-v1-trials.json",
+    "--output",
+    "{output}/cohort"
+  ],
+  "purpose": "Five paired full Products traces on one A5000 with identical seed-42 GraphSAGE weights and recorded requests per repetition. Report warm-update phases and all-node final oracle logit MSE."
+}

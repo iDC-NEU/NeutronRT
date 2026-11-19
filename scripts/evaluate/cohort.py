@@ -79,6 +79,11 @@ def main(plan: Annotated[Path, typer.Argument()], output: Annotated[Path, typer.
 			raise ValueError("Trial IDs must be plain directory names")
 	if not 0 < settings["startup_seconds"] <= settings["wall_seconds"]:
 		raise ValueError("Invalid trial deadlines")
+	if expected_gpu := settings.get("gpu_model"):
+		import torch
+
+		if torch.cuda.device_count() != 1 or torch.cuda.get_device_name(0) != expected_gpu:
+			raise RuntimeError(f"Cohort requires exactly one visible {expected_gpu}")
 	output.mkdir(parents=True, exist_ok=False)
 	save(output / "plan.json", settings)
 	results = []

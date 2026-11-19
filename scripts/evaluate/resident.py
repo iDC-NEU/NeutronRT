@@ -15,7 +15,7 @@ import torch
 import typer
 from torch import Tensor
 
-from benchmarks.streaming import _from_wire, apply_update, decode_update
+from benchmarks.streaming import _from_wire, _phase, apply_update, decode_update
 from benchmarks.streaming import run as run_native
 from lib.dataset.inference import load_graph
 from lib.graph.resident_runtime import (
@@ -83,7 +83,9 @@ def _run_nrt(
 	capacity_bytes: int,
 	labels: torch.Tensor | None,
 	test_mask: torch.Tensor | None,
+	phase_file: Path | None = None,
 ) -> dict[str, Any]:
+	phase_fields = {"method": Method.NRT_INC.value, "repetition": recording.repetition}
 	model_started = perf_counter()
 	model = recording.spec.build()
 	model_loading_seconds = perf_counter() - model_started
@@ -95,6 +97,7 @@ def _run_nrt(
 	if device.type == "cuda":
 		torch.cuda.init()
 		torch.cuda.reset_peak_memory_stats(device)
+	_phase(phase_file, "initialization", **phase_fields)
 	placement_started = perf_counter()
 	runtime = ResidentGraphSAGE(
 		graph,
@@ -123,6 +126,7 @@ def _run_nrt(
 			test_mask=test_mask[nodes] if test_mask is not None else None,
 		) | {"exact_equivalence_required": True}
 
+	_phase(phase_file, "warmup", **phase_fields)
 	checks = [check(verification_nodes)]
 	warmup = []
 	warmup_updates = [decode_update(request) for request in recording.warmup]
@@ -138,7 +142,8 @@ def _run_nrt(
 	queries: list[float] = []
 	measured_seconds = 0.0
 	harness_started = perf_counter()
-	for decoded, query_nodes in steps:
+	for index, (decoded, query_nodes) in enumerate(steps):
+		_phase(phase_file, "update", index=index, **phase_fields)
 		step_started = perf_counter()
 		update = runtime.update(decoded)
 		query_started = perf_counter()
@@ -161,6 +166,7 @@ def _run_nrt(
 		updates.append(update)
 	measured_seconds = sum(item["service_seconds"] for item in updates)
 	memory = _memory(device)
+	_phase(phase_file, "oracle", **phase_fields)
 	oracle_replay_started = perf_counter()
 	for decoded, _ in steps:
 		apply_update(oracle_graph, oracle_features, decoded)
@@ -284,8 +290,10 @@ def main(
 	capacity_bytes: Annotated[int, typer.Option(min=1, help="Hard resident admission capacity")] = 8 * 1024**3,
 	batch_size: Annotated[int, typer.Option(min=1)] = 8192,
 	threads: Annotated[int, typer.Option(min=1)] = 4,
+	phase_file: Annotated[Path | None, typer.Option()] = None,
 ) -> None:
 	logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+	_phase(phase_file, "loading", method=method.value)
 	torch.set_num_threads(threads)
 	loading_started = perf_counter()
 	recording = RecordedWorkload.load(workload, checkpoint=checkpoint)
@@ -308,6 +316,7 @@ def main(
 			capacity_bytes=capacity_bytes,
 			labels=labels_value,
 			test_mask=test_mask,
+			phase_file=phase_file,
 		)
 	else:
 		model = recording.spec.build()
@@ -328,6 +337,7 @@ def main(
 			test_mask=test_mask,
 			resident=True,
 			resident_capacity_bytes=capacity_bytes,
+			phase_file=phase_file,
 		)
 	report["loading"] = {
 		**report.get("loading", {}),
@@ -335,6 +345,7 @@ def main(
 		"scope": "workload/graph/features/labels ingress plus model load; excluded from measured updates",
 	}
 	(output / "trial.json").write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")
+	_phase(phase_file, "done", method=method.value, repetition=recording.repetition)
 
 
 if __name__ == "__main__":

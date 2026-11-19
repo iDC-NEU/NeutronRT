@@ -14,6 +14,15 @@ class SessionOwner:
 
 	@classmethod
 	def discover(cls, thread: str) -> "SessionOwner":
+		# With an app-server, the attached terminal client is outside our ancestry.
+		client_pid = os.environ.get("NEUBOX_CODEX_CLIENT_PID")
+		if client_pid:
+			folder = Path("/proc") / str(int(client_pid))
+			fields = (folder / "stat").read_text().rsplit(")", 1)[1].split()
+			command = (folder / "cmdline").read_bytes().split(b"\0")
+			if Path(os.fsdecode(command[0])).name != "codex" or thread.encode() not in command:
+				raise RuntimeError("The specified Codex client does not own this thread")
+			return cls(int(client_pid), fields[19], thread)
 		pid = os.getpid()
 		while pid > 1:
 			folder = Path(f"/proc/{pid}")

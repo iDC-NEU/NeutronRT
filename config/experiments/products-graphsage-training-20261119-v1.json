@@ -1,0 +1,36 @@
+{
+  "id": "products-graphsage-training-20261119-v1",
+  "purpose": "Train the shared Products GraphSAGE checkpoint on the exact prepared replay topology. Select on validation and evaluate test after selection.",
+  "hardware_profile": "baseline-gpu",
+  "wall_seconds": 28800,
+  "environment": {
+    "OMP_NUM_THREADS": "4",
+    "MKL_NUM_THREADS": "4",
+    "OPENBLAS_NUM_THREADS": "4"
+  },
+  "required_files": [
+    "/mnt/nfs0/lvhr/neutronrt-results/preparation/topology-five-20261116-v1/topologies/products/graph.bin",
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/products/raw/node-label.csv.gz",
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/products/split/sales_ranking/train.csv.gz",
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/products/split/sales_ranking/valid.csv.gz",
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/products/split/sales_ranking/test.csv.gz"
+  ],
+  "hash_files": [
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/products/raw/node-label.csv.gz",
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/products/split/sales_ranking/train.csv.gz",
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/products/split/sales_ranking/valid.csv.gz",
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/products/split/sales_ranking/test.csv.gz"
+  ],
+  "command": [
+    "{python}",
+    "-m",
+    "scripts.train_products",
+    "/mnt/nfs0/lvhr/neutronrt-results/preparation/topology-five-20261116-v1/topologies/products/graph.bin",
+    "/mnt/nfs0/lvhr/neutronrt-evaluation-data/products",
+    "{output}/training",
+    "--epochs",
+    "20",
+    "--device",
+    "cuda:0"
+  ]
+}

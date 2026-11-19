@@ -161,7 +161,9 @@ def _receive(connection, seconds):
 	return result
 
 
-def exercise(stub, trace, case, session, query, *, prefix, timeout, capture_queries=False):
+def exercise(
+	stub, trace, case, session, query, *, prefix, timeout, capture_queries=False, query_history_bytes=64 * 1024**2
+):
 	"""Client wall time includes serialization/admission/queueing and RPC waits.
 
 	Async completion latency is observed by ordered waits at bounded concurrency;
@@ -215,14 +217,17 @@ def exercise(stub, trace, case, session, query, *, prefix, timeout, capture_quer
 			query_versions.append(reply.version)
 			if capture_queries:
 				captured_bytes += reply.ByteSize()
-				if captured_bytes > 64 * 1024**2:
-					raise MemoryError("Captured query samples exceed 64 MiB; reduce query frequency or size")
+				if captured_bytes > query_history_bytes:
+					raise MemoryError("Captured query samples exceed the query history budget")
 				captured.append(reply)
+	drain_started = perf_counter()
 	while pending:
 		finish(*pending.popleft())
-	client_window = perf_counter() - start
+	finished = perf_counter()
+	client_window = finished - start
 	return {
 		"client_seconds": client_window,
+		"client_drain_seconds": finished - drain_started,
 		"last_observed_publication_seconds": last_completion - start,
 		"completed_updates": completed,
 		"completed_input_changes": changes,
@@ -352,6 +357,7 @@ def run_case(
 				prefix="measure",
 				timeout=options["timeout"],
 				capture_queries=True,
+				query_history_bytes=options["query_history_bytes"],
 			)
 			connection.send({"op": "stop"})
 			profile = _receive(connection, options["timeout"])
@@ -391,10 +397,7 @@ def run_case(
 				"profile": profile,
 				"engine_seconds": profile["engine"]["completion_window_seconds"],
 				"query_accuracy": metrics,
-				"correctness": {
-					"max_abs_error": float((actual - expected).abs().max()),
-					"prediction_disagreement": float((actual.argmax(1) != expected.argmax(1)).float().mean()),
-				},
+				"correctness": query_error(actual, expected, labels=labels, test_mask=test_mask),
 			}
 			(folder / "result.json").write_text(json.dumps(result, indent=2) + "\n")
 		connection.send({"op": "close"})
@@ -588,14 +591,23 @@ def _run(args: Options) -> None:
 		test_mask = torch.zeros(graph.num_nodes(), dtype=torch.bool)
 		test_mask[test_nodes] = True
 		test_mask = test_mask[query]
-	if any(case.query_every for case in cases) and (len(trace) + 1) * query.numel() * spec.classes * 4 > 64 * 1024**2:
-		raise MemoryError("Selected-row reference history exceeds 64 MiB; reduce queries or updates")
+	query_history_bytes = (128 if args.query_selection == "test" else 64) * 1024**2
+	if (
+		any(case.query_every for case in cases)
+		and (len(trace) + 1) * query.numel() * spec.classes * 4 > query_history_bytes
+	):
+		raise MemoryError("Selected-row reference history exceeds the query history budget")
 	oracles = reference_oracles(
 		graph, features, trace, query, spec.build(), every_version=any(case.query_every for case in cases)
 	)
 	del graph, features
 	args.output.mkdir(parents=True, exist_ok=True)
-	options = {**vars(args), "data": str(args.data.resolve()), "output": str(args.output.resolve())}
+	options = {
+		**vars(args),
+		"data": str(args.data.resolve()),
+		"output": str(args.output.resolve()),
+		"query_history_bytes": query_history_bytes,
+	}
 
 	def attempt(case, repetition, *, trace_pass=False):
 		case_identity = identities[case.name]
