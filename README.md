@@ -11,8 +11,8 @@ Use Python 3.12 and matching PyTorch/DGL 2.4 builds. For CPU development:
 ```bash
 conda create -n graph python=3.12 -y
 conda activate graph
-pip install torch==2.4.0 --index-url https://download.pytorch.org/whl/cpu
-conda install -c dglteam/label/th24_cpu dgl=2.4.0.th24.cpu
+conda install 'dglteam/label/th24_cpu::dgl=2.4.0.th24.cpu=py312_0'
+python -m pip install 'torch==2.4.0+cpu' --index-url https://download.pytorch.org/whl/cpu
 pip install -e '.[dev]' grpcio-tools==1.75.1
 pre-commit install
 ```
@@ -20,8 +20,8 @@ pre-commit install
 For CUDA 12.4, install the corresponding backends before the project:
 
 ```bash
-pip install torch==2.4.0 --index-url https://download.pytorch.org/whl/cu124
-conda install -c dglteam/label/th24_cu124 dgl=2.4.0.th24.cu124
+conda install 'dglteam/label/th24_cu124::dgl=2.4.0.th24.cu124'
+python -m pip install 'torch==2.4.0+cu124' --index-url https://download.pytorch.org/whl/cu124
 ```
 
 ## Test

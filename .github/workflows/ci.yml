@@ -37,10 +37,21 @@ jobs:
           python-version: "3.12"
       - name: Install CPU-only PyTorch and matching DGL
         run: |
-          conda install --yes --channel dglteam/label/th24_cpu dgl=2.4.0.th24.cpu
-          pip install torch==2.4.0 --index-url https://download.pytorch.org/whl/cpu
+          conda install --yes 'dglteam/label/th24_cpu::dgl=2.4.0.th24.cpu=py312_0'
+          python -m pip install 'torch==2.4.0+cpu' --index-url https://download.pytorch.org/whl/cpu
       - name: Install runtime and test dependencies
-        run: pip install -e '.[dev]' grpcio-tools==1.75.1
+        run: python -m pip install -e '.[dev]' grpcio-tools==1.75.1
+      - name: Verify CPU graph backends
+        run: |
+          python - <<'PY'
+          import dgl
+          import torch
+
+          print(f"PyTorch {torch.__version__}, DGL {dgl.__version__}")
+          assert torch.__version__ == "2.4.0+cpu"
+          assert dgl.__version__ == "2.4.0"
+          assert dgl.graph(([0], [1])).num_edges() == 1
+          PY
       - name: Verify generated RPC stubs
         run: |
           python -m scripts.generate_inference_proto
