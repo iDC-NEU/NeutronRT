@@ -1,4 +1,4 @@
-"""Find and extract Python definitions from a Git working tree."""
+"""Find Python definitions and likely callers in a Git working tree."""
 
 import argparse
 import ast
@@ -182,6 +182,82 @@ def _git(directory: Path, *args: str) -> bytes:
 	return result.stdout
 
 
+def _python_paths(root: Path, filters: list[str]) -> Iterator[Path]:
+	paths = _git(
+		root, "--literal-pathspecs", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", *filters
+	)
+	for name in dict.fromkeys(os.fsdecode(paths).split("\0")):
+		path = Path(name)
+		if path.suffix in (".py", ".pyi") and not (root / path).is_symlink():
+			yield path
+
+
+class CallSites(ast.NodeVisitor):
+	def __init__(self, path: Path, tree: ast.Module):
+		self.path = path
+		self.scope: list[str] = []
+		self.calls: list[tuple[int, str, str]] = []
+		self.imports: list[ast.ImportFrom] = []
+		self.visit(tree)
+
+	def visit_FunctionDef(self, node: Definition) -> None:
+		self.scope.append(node.name)
+		self.generic_visit(node)
+		self.scope.pop()
+
+	visit_AsyncFunctionDef = visit_FunctionDef
+	visit_ClassDef = visit_FunctionDef
+
+	def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+		self.imports.append(node)
+
+	def visit_Call(self, node: ast.Call) -> None:
+		func = node.func
+		if isinstance(func, (ast.Name, ast.Attribute)):
+			self.calls.append((node.lineno, ".".join(self.scope) or "<module>", ast.unparse(func)))
+		self.generic_visit(node)
+
+
+def _print_callers(root: Path, symbol: Symbol, limit: int) -> None:
+	owner, _, name = symbol.qualified_name.rpartition(".")
+	definition_path = Path(symbol.path)
+	module = ".".join(definition_path.with_suffix("").parts).removesuffix(".__init__")
+	matches = []
+	for relative_path in _python_paths(root, []):
+		try:
+			with tokenize.open(root / relative_path) as stream:
+				source = CallSites(relative_path, ast.parse(stream.read(), filename=str(relative_path)))
+		except FileNotFoundError:
+			continue
+		except (OSError, SyntaxError, UnicodeError, LookupError) as error:
+			print(f"symbols: {relative_path}: {error}", file=sys.stderr)
+			continue
+		aliases: set[str] = set()
+		for statement in source.imports:
+			if statement.module == module and statement.level == 0 and not owner:
+				aliases.update(item.asname or item.name for item in statement.names if item.name == name)
+		for line, scope, expression in source.calls:
+			tail = expression.rsplit(".", 1)[-1]
+			if expression in aliases or expression == f"{module}.{symbol.qualified_name}":
+				priority = 0
+			elif owner and expression in {f"self.{name}", f"cls.{name}"}:
+				if source.path != definition_path or not scope.startswith(f"{owner}."):
+					continue
+				priority = 1
+			elif owner and (expression == symbol.qualified_name or expression.endswith(f".{symbol.qualified_name}")):
+				priority = 1
+			elif not owner and tail == name:
+				priority = 1 if source.path == definition_path else 2
+			else:
+				continue
+			matches.append((priority, source.path, line, scope, expression))
+	print("\nLikely callers (static matches)")
+	for _, path, line, scope, expression in sorted(set(matches))[:limit]:
+		print(f"  {path}:{line}  {scope} → {expression}()")
+	if not matches:
+		print("  No matching call sites found")
+
+
 def _positive_int(value: str) -> int:
 	number = int(value)
 	if number < 1:
@@ -217,7 +293,7 @@ An explicit --ranker applies only to ordinary searches.""",
 		"-x", "--exact", action="store_const", const="exact", dest="mode", help="case-sensitive exact name"
 	)
 	parser.add_argument("--ranker", choices=("fuzzy", "bm25", "vector"), help="ranking method (default: fuzzy)")
-	parser.add_argument("-k", "--topk", "--top-k", type=_positive_int, help="limit candidate count")
+	parser.add_argument("-k", "--topk", "--top-k", "--limit", type=_positive_int, help="limit candidate count")
 	parser.add_argument("--root", type=Path, default=Path.cwd(), help="start Git root discovery here")
 	parser.add_argument(
 		"--path", action="append", default=[], help="restrict to a repository-relative file or directory"
@@ -225,55 +301,61 @@ An explicit --ranker applies only to ordinary searches.""",
 	parser.add_argument("--kind", choices=("function", "method", "class"), help="restrict to a definition kind")
 	output = parser.add_mutually_exclusive_group()
 	output.add_argument("--show", type=_positive_int, metavar="N", help="print only the source for candidate N")
+	output.add_argument("--callers", type=_positive_int, metavar="N", help="show likely callers for candidate N")
+	output.add_argument("--pick", type=_positive_int, metavar="N", help="preview candidate N and show its callers")
+	parser.add_argument("--lines", type=_positive_int, help="preview at most this many definition lines")
 	output.add_argument("--json", action="store_true", help="emit candidates as JSON")
 	args = parser.parse_args(argv)
 	if not args.query.strip():
 		parser.error("query must not be blank")
 	if args.mode and args.ranker:
 		parser.error("--ranker applies only to ordinary searches")
+	if args.lines and (args.show or args.callers or args.json):
+		parser.error("--lines is for definition previews")
+	preview = args.pick or (1 if args.lines else None)
+	selected = args.show or args.callers or preview
 	ranker = args.ranker or "fuzzy"
 	try:
 		pattern = re.compile(args.query) if args.mode == "regex" else None
 		root = Path(os.fsdecode(_git(args.root, "rev-parse", "--show-toplevel")).removesuffix("\n"))
-		paths = _git(
-			root,
-			"--literal-pathspecs",
-			"ls-files",
-			"-z",
-			"--cached",
-			"--others",
-			"--exclude-standard",
-			"--",
-			*args.path,
-		)
+		paths = list(_python_paths(root, args.path))
 	except (OSError, ValueError, re.error) as error:
 		parser.error(str(error))
 
 	candidates: list[Candidate] = []
-	for relative_path in dict.fromkeys(os.fsdecode(paths).split("\0")):
-		path = root / relative_path
-		if path.suffix not in (".py", ".pyi") or path.is_symlink():
-			continue
+	for relative in paths:
+		relative_path = relative.as_posix()
+		path = root / relative
 		try:
 			with tokenize.open(path) as file:
 				source = file.read()
 			for symbol, docstring in _symbols(relative_path, source, include_docstrings=ranker != "fuzzy"):
 				if args.kind and symbol.kind != args.kind:
 					continue
-				candidates.append((symbol, docstring, source if args.show else ""))
+				candidates.append((symbol, docstring, source if args.show or preview else ""))
 		except FileNotFoundError:
 			continue  # A tracked file can be deleted from the working tree.
 		except (OSError, SyntaxError, UnicodeError, LookupError, tokenize.TokenError) as error:
 			print(f"symbols: {relative_path}: {error}", file=sys.stderr)
 
-	matches = _rank_candidates(args.query, candidates, args.mode, pattern, ranker)[: args.topk]
-	if args.show:
-		if args.show > len(matches):
-			print(f"symbols: candidate {args.show} is unavailable ({len(matches)} matches)", file=sys.stderr)
-			return 1
-		symbol, _, source = matches[args.show - 1]
-		lines = source.split("\n")
-		print("\n".join(lines[symbol.start_line - 1 : symbol.end_line]))
+	topk = max(preview, args.topk or 8) if preview else args.topk
+	matches = _rank_candidates(args.query, candidates, args.mode, pattern, ranker)[:topk]
+	if selected and selected > len(matches):
+		print(f"symbols: candidate {selected} is unavailable ({len(matches)} matches)", file=sys.stderr)
+		return 1
+	if selected:
+		symbol, _, source = matches[selected - 1]
+		if args.show:
+			print("\n".join(source.split("\n")[symbol.start_line - 1 : symbol.end_line]))
+		else:
+			if preview:
+				stop = min(symbol.end_line, symbol.start_line + (args.lines or 16) - 1)
+				print(f"{symbol.qualified_name}  {symbol.path}:{symbol.start_line}-{stop}")
+				print("\n".join(source.split("\n")[symbol.start_line - 1 : stop]))
+			try:
+				_print_callers(root, symbol, args.topk or 8)
+			except (OSError, ValueError) as error:
+				parser.error(str(error))
 	elif args.json:
 		print(json.dumps([dict(asdict(symbol), line_count=symbol.line_count) for symbol, _, _ in matches], indent=2))
 	else:

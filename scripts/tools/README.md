@@ -17,6 +17,12 @@ python -m scripts.tools.symbols --regex '^IncrementalLayers\.' --path lib/models
 # Retrieve a specific method by its qualified name.
 python -m scripts.tools.symbols --exact IncrementalLayers.apply --show 1
 
+# Find likely callers across the repository for the selected definition.
+python -m scripts.tools.symbols --exact _fresh --path scripts/evaluate/resident.py --callers 1
+
+# Preview a selected definition and show up to five likely callers.
+python -m scripts.tools.symbols --exact _fresh --path scripts/evaluate/resident.py --pick 1 --lines 12 --limit 5
+
 # Export candidates for another tool.
 python -m scripts.tools.symbols incremental --topk 5 --json
 
@@ -31,6 +37,9 @@ Each result has a candidate number, qualified name, repository-relative path,
 inclusive line range, line count, and definition kind. Extraction preserves the
 original indentation and includes decorators and the definition body.
 Use `--show N` with the same query and filters to select candidate N.
+Use `--callers N` with the same query and filters to list likely call sites
+across the repository. Caller lookup uses static matches for imports, names
+and recognizable receivers. Dynamic dispatch may require a follow-up search.
 
 All three rankers are case-insensitive and prioritize exact qualified names,
 then exact short names with shorter enclosing names first. For example, a
