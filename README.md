@@ -1,12 +1,12 @@
 # NeutronRT
 
-Real-time GNN inference with versioned embeddings, graph updates and distributed
-workers. Run the commands below from the repository root. Datasets, checkpoints,
-logs and generated results are local inputs and are not included in this release.
+NeutronRT serves real-time GNN inference on evolving graphs. It processes graph
+updates with distributed workers and serves queries against versioned embeddings.
 
 ## Install
 
-Use Python 3.12 and matching PyTorch/DGL 2.4 builds. For CPU development:
+Run the installation commands from the repository root. The CPU setup uses
+Python 3.12 and matching PyTorch and DGL 2.4 builds.
 
 ```bash
 conda create -n graph python=3.12 -y
@@ -50,7 +50,14 @@ are checked as wheel resources by `tests/test_distribution.py`.
 
 ## Run
 
-Use a prepared graph directory and a matching checkpoint:
+The server takes a prepared graph directory and a matching model checkpoint.
+The dataset preparation CLI lists the supported inputs and preparation options.
+
+```bash
+python -m scripts.download_datasets --help
+```
+
+Start the inference server and run the benchmark client from a second terminal.
 
 ```bash
 python -m scripts.simple --data /path/to/arxiv/raw --workers cuda:0 \
@@ -72,9 +79,8 @@ python -m scripts.evaluate.profile --data /path/to/arxiv/raw \
 ```
 
 `examples/profiles/deferred-cpu.json` provides exact execution and version windows
-of 0, 1, 2, 4 and 8. A version window does not impose a numerical error budget.
-Wait for every admitted update, including final deferred publication, before
-stopping a measurement; unfinished service publication invalidates the profile.
+of 0, 1, 2, 4 and 8. These windows bound version lag. A valid profile requires
+every admitted update to publish by the end of the measurement.
 
 Distributed trial reports include `workload_counts` for warmup, measured and total
 requests, with per-request sizes. Edge counts refer to requested directed pairs;
@@ -116,10 +122,10 @@ reused and remains on disk when the evaluator exits.
 
 ## Layout
 
-Dedicated standard and published-system baselines are documented in
-[`benchmarks/README.md`](benchmarks/README.md). They execute separately from
-NeutronRT; framework-hosted Full/NS/UER are mechanism ablations, not reproductions
-of external systems. Source pins and comparison roles are in `benchmarks/sources.json`.
+The benchmark guide describes the standalone baseline adapters and the
+framework-hosted Full, NS and UER ablations. The source registry records
+implementation revisions and comparison roles. [Benchmark guide](benchmarks/README.md)
+· [Source registry](benchmarks/sources.json)
 
 - `lib/`: models, graph/storage, runtime, RPC, communication and profiling.
 - `scripts/`: launch, preparation, validation and evaluation commands.
